@@ -6,7 +6,6 @@ tools:
   - search
   - edit
   - agent
-  - web
   - todo
 user-invocable: true
 ---
