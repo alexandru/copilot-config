@@ -1,4 +1,18 @@
-#!/bin/sh
+#!/bin/bash
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT="$0"
+while [ -L "$SCRIPT" ]; do
+  DIR="$(cd -P "$(dirname "$SCRIPT")" && pwd)"
+  SCRIPT="$(readlink "$SCRIPT")"
+  [[ "$SCRIPT" != /* ]] && SCRIPT="$DIR/$SCRIPT"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT")" && pwd)"
+
+cd "$SCRIPT_DIR" || exit 1
+
+if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then
+  npm install --silent --no-progress || exit 1
+fi
+
+cd "$SCRIPT_DIR/.." || exit 1
 exec node "$SCRIPT_DIR/copilot-switch.js" "$@"

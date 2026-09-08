@@ -27,3 +27,4 @@ mcp-config.json
 ide
 vscode.session.*
 open-sessions-state.json
+installed-plugins.lock
