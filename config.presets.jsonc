@@ -56,17 +56,17 @@
   },
   "personal": {
     "settings.json": {
-      "model": "claude-sonnet-5",
-      "effortLevel": "medium",
+      "model": "gpt-5.6-terra",
+      "effortLevel": "high",
       "subagents": {
         "agents": {
           "Orchestrator": {
-            "model": "claude-sonnet-5",
-            "effortLevel": "medium"
+            "model": "gpt-5.6-terra",
+            "effortLevel": "high"
           },
           "Junior": {
             "model": "gpt-5.6-luna",
-            "effortLevel": "medium"
+            "effortLevel": "high"
           },
           "Explorer": {
             "model": "gpt-5.6-luna",
