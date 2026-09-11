@@ -9,13 +9,13 @@ Part of [alexandru/agents-config](https://github.com/alexandru/agents-config).
 
 ### Clone the repository
 
-**WARN** — This is for a fresh Copilot instalation (no history):
+**WARN** — This is for a fresh Copilot installation (no history):
 
 ```sh
 git clone https://github.com/alexandru/copilot-config.git ~/.copilot
 ```
 
-**WARN:** This is your Copilot's working directory, so you may already have a `~/.copilot` that you may need to delete, in which case you could lose all your sessios. An alternative would be...
+**WARN:** This is your Copilot's working directory, so you may already have a `~/.copilot` that you may need to delete, in which case you could lose all your sessions. An alternative would be...
 
 ```sh
 if [[ -d ~/.copilot ]]; then
@@ -51,8 +51,7 @@ make install-skills
 ```
 
 The skills are installed under `~/.agents/skills`, where Copilot CLI,
-OpenCode, and Codex can share them. The Copilot-specific `/grill-me` and
-`/plan-implementation` command adapters remain tracked in this repository.
+OpenCode, Codex, and Pi can share them.
 </details>
 
 <details>
@@ -72,7 +71,7 @@ alias copilot='command copilot --agent Orchestrator --yolo'
 
 ### Choose a configuration preset
 
-The [copilot-switch](./bin/copilot-switch.js) utility is for quickly switching between multiple setting presents (e.g., multiple sets of models assigned to your agents).
+The [copilot-switch](./bin/copilot-switch.js) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents).
 
 ```sh
 # Example:
@@ -134,8 +133,6 @@ Sub-agents:
 - [Librarian](./agents/Librarian.agent.md): read-only external documentation and dependency-source research.
 
 ## Defined commands
-
-Commands use currently selected primary agent and do not override it.
 
 - `/plan-implementation`: prepare a detailed implementation plan and save it as a Markdown specification file.
 - `/grill-me`: stress-test a plan or decision.
