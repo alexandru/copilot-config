@@ -10,6 +10,10 @@
             "model": "gemini-3.7-flash",
             "effortLevel": "high"
           },
+          "Solo": {
+            "model": "gemini-3.7-flash",
+            "effortLevel": "high"
+          },
           "Junior": {
             "model": "mai-code-1.1-flash",
             "effortLevel": "high"
@@ -61,6 +65,10 @@
       "subagents": {
         "agents": {
           "Orchestrator": {
+            "model": "gpt-5.6-terra",
+            "effortLevel": "high"
+          },
+          "Solo": {
             "model": "gpt-5.6-terra",
             "effortLevel": "high"
           },
@@ -138,6 +146,9 @@
           "Orchestrator": {
             "model": "auto"
           },
+          "Solo": {
+            "model": "auto"
+          },
         },
       }
     },
@@ -150,6 +161,9 @@
       "subagents": {
         "agents": {
           "Orchestrator": {
+            "model": "auto"
+          },
+          "Solo": {
             "model": "auto"
           },
         },

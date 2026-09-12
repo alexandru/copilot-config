@@ -11,7 +11,7 @@ const outputConfigs = {
   "mcp-config.json": path.join(root, "mcp-config.common.jsonc"),
 };
 const presetMetadataKeys = new Set(["common", "extends"]);
-const primaryAgents = ["Orchestrator"];
+const primaryAgents = ["Orchestrator", "Solo"];
 
 function fail(message) {
   console.error(`Error: ${message}`);
