@@ -2,42 +2,39 @@
 {
   "work": {
     "settings.json": {
-      "model": "gemini-3.7-flash",
+      "model": "claude-sonnet-5",
       "effortLevel": "high",
       "subagents": {
         "agents": {
           "Orchestrator": {
-            "model": "gemini-3.7-flash",
+            "model": "claude-sonnet-5",
             "effortLevel": "high"
           },
           "Solo": {
-            "model": "gemini-3.7-flash",
+            "model": "claude-sonnet-5",
             "effortLevel": "high"
           },
           "Junior": {
-            "model": "mai-code-1.1-flash",
-            "effortLevel": "high"
+            "model": "claude-haiku-4.5",
           },
           "Explorer": {
-            "model": "mai-code-1.1-flash",
-            "effortLevel": "medium"
+            "model": "claude-haiku-4.5",
           },
           "Librarian": {
-            "model": "mai-code-1.1-flash",
-            "effortLevel": "medium"
+            "model": "claude-haiku-4.5",
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
-            "model": "mai-code-1.1-flash"
+            "model": "claude-haiku-4.5"
           },
           "task": {
-            "model": "mai-code-1.1-flash"
+            "model": "claude-haiku-4.5"
           },
           "general-purpose": {
-            "model": "mai-code-1.1-flash"
+            "model": "claude-haiku-4.5"
           },
           "rubber-duck": {
-            "model": "mai-code-1.1-flash"
+            "model": "claude-haiku-4.5"
           },
           "code-review": {
             "model": "grok-4.6",
