@@ -15,7 +15,8 @@
             "effortLevel": "high"
           },
           "Junior": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-sonnet-5",
+            "effortLevel": "low"
           },
           "Explorer": {
             "model": "claude-haiku-4.5",
