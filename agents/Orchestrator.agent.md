@@ -47,9 +47,9 @@ Use **Junior**:
 - For fully specified work that modifies state (files, network requests, etc.) beyond direct file editing.
 - Reasoning/cost: medium-to-high.
 
-You're allowed to call **yourself (Orchestrator)**:
+Call **Orchestrator**:
 
-- For requirements demanding parallelism, but only if the prompt is explicit.
+- When the instructions require parallelism for work that specialists MUST NOT perform.
 - Only one level (an Orchestrator sub-agent MUST NOT call on another Orchestrator sub-agent)
 - Reasoning/cost: max.
 
