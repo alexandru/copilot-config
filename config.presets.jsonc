@@ -8,15 +8,15 @@
         "agents": {
           "Orchestrator": {
             "model": "claude-sonnet-5",
-            "effortLevel": "high"
+            "effortLevel": "high",
           },
           "Solo": {
             "model": "claude-sonnet-5",
-            "effortLevel": "high"
+            "effortLevel": "high",
           },
           "Junior": {
             "model": "claude-sonnet-5",
-            "effortLevel": "low"
+            "effortLevel": "low",
           },
           "Explorer": {
             "model": "claude-haiku-4.5",
@@ -26,114 +26,114 @@
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
-            "model": "claude-haiku-4.5"
+            "model": "claude-haiku-4.5",
           },
           "task": {
-            "model": "claude-haiku-4.5"
+            "model": "claude-haiku-4.5",
           },
           "general-purpose": {
-            "model": "claude-haiku-4.5"
+            "model": "claude-haiku-4.5",
           },
           "rubber-duck": {
-            "model": "claude-haiku-4.5"
+            "model": "claude-haiku-4.5",
           },
           "code-review": {
             "model": "grok-4.6",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "research": {
             "model": "grok-4.6",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "security-review": {
             "model": "grok-4.6",
-            "effortLevel": "medium"
-          }
-        }
-      }
+            "effortLevel": "medium",
+          },
+        },
+      },
     },
     "mcp-config.json": {
-      "mcpServers": {}
-    }
+      "mcpServers": {},
+    },
   },
   "personal": {
     "settings.json": {
-      "model": "gpt-5.6-terra",
-      "effortLevel": "high",
+      "model": "gpt-5.6-sol",
+      "effortLevel": "medium",
       "subagents": {
         "agents": {
           "Orchestrator": {
-            "model": "gpt-5.6-terra",
-            "effortLevel": "high"
+            "model": "gpt-5.6-sol",
+            "effortLevel": "medium",
           },
           "Solo": {
-            "model": "gpt-5.6-terra",
-            "effortLevel": "high"
+            "model": "gpt-5.6-sol",
+            "effortLevel": "medium",
           },
           "Junior": {
             "model": "gpt-5.6-luna",
-            "effortLevel": "high"
+            "effortLevel": "high",
           },
           "Explorer": {
             "model": "gpt-5.6-luna",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "Librarian": {
             "model": "gpt-5.6-luna",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
             "model": "gpt-5.6-luna",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "task": {
             "model": "gpt-5.6-luna",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "general-purpose": {
             "model": "gpt-5.6-luna",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "rubber-duck": {
             "model": "gpt-5.6-luna",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "code-review": {
             "model": "claude-sonnet-5",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "research": {
             "model": "claude-sonnet-5",
-            "effortLevel": "medium"
+            "effortLevel": "medium",
           },
           "security-review": {
             "model": "claude-sonnet-5",
-            "effortLevel": "medium"
-          }
-        }
-      }
+            "effortLevel": "medium",
+          },
+        },
+      },
     },
     "mcp-config.json": {
       "mcpServers": {
         "mcp-intellij-idea": {
           "type": "sse",
           "url": "http://localhost:64342/sse",
-          "tools": ["*"]
+          "tools": ["*"],
         },
         "mcp-metals": {
           "type": "http",
           "url": "http://localhost:54640/mcp",
-          "tools": ["*"]
+          "tools": ["*"],
         },
         "mcp-chrome-devtools": {
           "type": "local",
           "command": "npx",
           "args": ["-y", "chrome-devtools-mcp@latest"],
-          "tools": ["*"]
-        }
-      }
-    }
+          "tools": ["*"],
+        },
+      },
+    },
   },
   "work-auto": {
     "extends": ["work"],
@@ -142,15 +142,15 @@
       "subagents": {
         "agents": {
           "Orchestrator": {
-            "model": "auto"
+            "model": "auto",
           },
           "Solo": {
-            "model": "auto"
+            "model": "auto",
           },
         },
-      }
+      },
     },
-    "mcp-config.json": {}
+    "mcp-config.json": {},
   },
   "personal-auto": {
     "extends": ["personal"],
@@ -159,14 +159,14 @@
       "subagents": {
         "agents": {
           "Orchestrator": {
-            "model": "auto"
+            "model": "auto",
           },
           "Solo": {
-            "model": "auto"
+            "model": "auto",
           },
         },
-      }
+      },
     },
-    "mcp-config.json": {}
-  }
+    "mcp-config.json": {},
+  },
 }
