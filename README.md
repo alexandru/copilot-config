@@ -71,7 +71,7 @@ alias copilot='command copilot --agent Orchestrator --yolo'
 
 ### Choose a configuration preset
 
-The [copilot-switch](./bin/copilot-switch.js) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents).
+The [copilot-switch](./bin/copilot-switch.rs) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents). It's built with Rust 😎, so you need [rustup](https://rustup.rs/) installed. 
 
 ```sh
 # Example:
