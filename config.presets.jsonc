@@ -58,46 +58,46 @@
   },
   "personal": {
     "settings.json": {
-      "model": "gpt-5.6-sol",
-      "effortLevel": "medium",
+      "model": "gpt-6-sol",
+      "effortLevel": "high",
       "subagents": {
         "agents": {
           "Orchestrator": {
-            "model": "gpt-5.6-sol",
-            "effortLevel": "medium",
-          },
-          "Solo": {
-            "model": "gpt-5.6-sol",
-            "effortLevel": "medium",
-          },
-          "Junior": {
-            "model": "gpt-5.6-luna",
+            "model": "gpt-6-sol",
             "effortLevel": "high",
           },
+          "Solo": {
+            "model": "gpt-6-sol",
+            "effortLevel": "high",
+          },
+          "Junior": {
+            "model": "gpt-6-luna",
+            "effortLevel": "xhigh",
+          },
           "Explorer": {
-            "model": "gpt-5.6-luna",
-            "effortLevel": "medium",
+            "model": "gpt-6-luna",
+            "effortLevel": "high",
           },
           "Librarian": {
-            "model": "gpt-5.6-luna",
-            "effortLevel": "medium",
+            "model": "gpt-6-luna",
+            "effortLevel": "high",
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
-            "model": "gpt-5.6-luna",
-            "effortLevel": "medium",
+            "model": "gpt-6-luna",
+            "effortLevel": "high",
           },
           "task": {
-            "model": "gpt-5.6-luna",
-            "effortLevel": "medium",
+            "model": "gpt-6-luna",
+            "effortLevel": "high",
           },
           "general-purpose": {
-            "model": "gpt-5.6-luna",
-            "effortLevel": "medium",
+            "model": "gpt-6-luna",
+            "effortLevel": "high",
           },
           "rubber-duck": {
-            "model": "gpt-5.6-luna",
-            "effortLevel": "medium",
+            "model": "gpt-6-luna",
+            "effortLevel": "high",
           },
           "code-review": {
             "model": "claude-sonnet-5",
