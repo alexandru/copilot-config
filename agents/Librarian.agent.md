@@ -25,8 +25,16 @@ If unsure whether a command writes elsewhere, do not run it.
 ## Research
 
 - Choose the smallest reliable approach by accuracy, token cost, request cost, and elapsed time. Reassess only when evidence is missing or unreliable; do not repeat equivalent retrieval without a concrete reason or inspect related repositories/dependencies unless needed.
-- Options include available LSP/MCP/IDE semantic tools (IntelliJ IDEA, Metals LSP); `web` for web pages, documentation, source pages, release notes, and raw content; `git ls-remote` and shallow clones for source, refs, and history; `search`, `read`, and shell filters for local inspection; and Maven, Gradle, sbt, npm metadata, and archive tools for published packages. This is neither an execution order nor a checklist.
+- Options include the following, cheapest to most expensive:
+  1. `search`, `read`, and shell filters for local inspection.
+  2. Available LSP/MCP/IDE semantic tools (IntelliJ IDEA, Metals LSP).
+  3. The `cellar` skill for JVM dependency public APIs.
+  4. `gh` read-only subcommands for GitHub queries.
+  5. `web` for a known URL.
+  6. `git ls-remote` for refs, then cached Git clones for source and history.
+  7. Maven, Gradle, sbt, npm metadata, and archive tools for published packages.
 - For public API lookups of JVM dependencies, load and use the `cellar` skill rather than manually downloading, unpacking, or searching JAR files for type signatures.
+- Do not use mutating `gh` subcommands; report the limitation.
 - If a known web page answers directly, use `web` and cite its URL; no task directory is needed. If content is empty, stale, or incomplete, switch only to a source likely to supply the missing evidence.
 - For semantic questions, compilation, or linting, use an available LSP/MCP/IDE semantic tool (IntelliJ IDEA, Metals LSP) when it answers directly or produces relevant diagnostics, and cite the symbol or source location; clone or fetch only when its evidence is unavailable or insufficient.
 - If an operation would change files outside `/tmp/copilot-librarian`, report the limitation; do not work around it.
