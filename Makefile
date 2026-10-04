@@ -32,6 +32,7 @@ install-skills:
 		resolving-merge-conflicts \
 		setup-matt-pocock-skills \
 		tdd \
+		teach \
 		to-spec \
 		to-tickets
 	npx skills add https://github.com/VirtusLab/cellar/ $(SKILLS_INSTALL_FLAGS)
