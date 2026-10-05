@@ -132,6 +132,12 @@
           "args": ["-y", "chrome-devtools-mcp@latest"],
           "tools": ["*"],
         },
+        "mcp-playwright": {
+          "type": "local",
+          "command": "npx",
+          "args": ["-y", "@playwright/mcp@latest"],
+          "tools": ["*"],
+        },
       },
     },
   },

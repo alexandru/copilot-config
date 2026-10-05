@@ -1,7 +1,8 @@
 // MCP servers and built-in subagents use separate settings.
 {
   "disabledMcpServers": [
-    "github-mcp-server"
+    "github-mcp-server",
+    "mcp-playwright"
   ],
   "subagents": {
     "maxDepth": 2,

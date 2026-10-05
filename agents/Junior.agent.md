@@ -11,6 +11,7 @@ tools:
   - "mcp-intellij-idea/*"
   - "mcp-metals/*"
   - "mcp-chrome-devtools/*"
+  - "mcp-playwright/*"
 user-invocable: false
 ---
 
