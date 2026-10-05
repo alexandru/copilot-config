@@ -1,7 +1,7 @@
 # Manual global skill installation. Never run automatically (no CI, no hooks).
 # Review upstream skill content before installation.
 
-MATTPOCOCK_SKILLS_TAG := v1.2.3
+MATTPOCOCK_SKILLS_TAG := v1.3.1
 SKILLS_AGENT := github-copilot
 SKILLS_INSTALL_FLAGS := -g -a $(SKILLS_AGENT) -y
 
@@ -29,7 +29,6 @@ install-skills:
 		handoff \
 		implement \
 		improve-codebase-architecture \
-		resolving-merge-conflicts \
 		setup-matt-pocock-skills \
 		tdd \
 		teach \
