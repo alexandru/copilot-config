@@ -1,6 +1,7 @@
 # Manual global skill installation. Never run automatically (no CI, no hooks).
 # Review upstream skill content before installation.
 
+ALEXANDRU_SKILLS_TAG := v9.0.0
 MATTPOCOCK_SKILLS_TAG := v1.3.1
 SKILLS_AGENT := github-copilot
 SKILLS_INSTALL_FLAGS := -g -a $(SKILLS_AGENT) -y
@@ -16,10 +17,11 @@ check-mattpocock-skills-tag:
 	fi
 
 install-skills:
-	npx skills add https://github.com/alexandru/skills/ $(SKILLS_INSTALL_FLAGS) --skill \
+	npx skills add https://github.com/alexandru/skills/tree/$(ALEXANDRU_SKILLS_TAG) $(SKILLS_INSTALL_FLAGS) --skill \
 		code-review \
 		code-reviewing \
-		simplify
+		simplify \
+		simplifying
 	npx skills add https://github.com/mattpocock/skills/tree/$(MATTPOCOCK_SKILLS_TAG) $(SKILLS_INSTALL_FLAGS) --skill \
 		codebase-design \
 		diagnosing-bugs \
