@@ -142,15 +142,16 @@ Sub-agents:
 
 ## Shared skills
 
-- [alexandru/skills](https://github.com/alexandru/skills/tree/v9.0.0)
+- [alexandru/skills](https://github.com/alexandru/skills/tree/v10.0.0)
   - `code-review`: user-invoked adapter for `code-reviewing`.
   - `code-reviewing`: review changed code for bugs, structural problems, performance issues, and unintended behavior.
-  - `simplify`: behavior-preserving simplification loop using a reviewer and `simplifying`.
-  - `simplifying`: simplification lenses of constraints, simplicity, and parametricity.
+  - `simplicity`: simplification lenses of constraints, simplicity, and parametricity.
+  - `simplify`: behavior-preserving simplification using the `simplicity` lenses.
 - [mattpocock/skills](https://github.com/mattpocock/skills/tree/v1.3.1)
   - `codebase-design`: deep-module design vocabulary and principles.
   - `diagnosing-bugs`: disciplined diagnosis for hard bugs and regressions.
   - `domain-modeling`: domain language and architectural decisions.
+  - `grill-me`: user-invoked adapter for `grilling`.
   - `grill-with-docs`: sharpen a plan or design while creating domain documentation.
   - `grilling`: structured decision-tree interviews.
   - `handoff`: prepare context for another agent or session.
