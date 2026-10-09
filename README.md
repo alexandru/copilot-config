@@ -142,9 +142,10 @@ Sub-agents:
 
 ## Shared skills
 
-- [alexandru/skills](https://github.com/alexandru/skills/tree/v10.0.0)
+- [alexandru/skills](https://github.com/alexandru/skills/tree/v10.2.0)
   - `code-review`: user-invoked adapter for `code-reviewing`.
   - `code-reviewing`: review changed code for bugs, structural problems, performance issues, and unintended behavior.
+  - `mcp-access`: access MCP servers when native MCP tools are unavailable or unsupported.
   - `simplicity`: simplification lenses of constraints, simplicity, and parametricity.
   - `simplify`: behavior-preserving simplification using the `simplicity` lenses.
 - [mattpocock/skills](https://github.com/mattpocock/skills/tree/v1.3.1)
