@@ -58,17 +58,17 @@
   },
   "personal": {
     "settings.json": {
-      "model": "gpt-6-sol",
-      "effortLevel": "high",
+      "model": "gpt-6.1-sol",
+      "effortLevel": "medium",
       "subagents": {
         "agents": {
           "Orchestrator": {
-            "model": "gpt-6-sol",
-            "effortLevel": "high",
+            "model": "gpt-6.1-sol",
+            "effortLevel": "medium",
           },
           "Solo": {
-            "model": "gpt-6-sol",
-            "effortLevel": "high",
+            "model": "gpt-6.1-sol",
+            "effortLevel": "medium",
           },
           "Junior": {
             "model": "gpt-6-luna",
