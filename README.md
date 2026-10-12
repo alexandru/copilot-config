@@ -12,26 +12,32 @@ Part of [alexandru/agents-config](https://github.com/alexandru/agents-config).
 **WARN** — This is for a fresh Copilot installation (no history):
 
 ```sh
-git clone https://github.com/alexandru/copilot-config.git ~/.copilot
+git clone https://github.com/alexandru/copilot-config.git ~/.copilot &&
+  git -C ~/.copilot config --local status.showUntrackedFiles no
 ```
 
 **WARN:** This is your Copilot's working directory, so you may already have a `~/.copilot` that you may need to delete, in which case you could lose all your sessions. An alternative would be...
 
-```sh
-if [[ -d ~/.copilot ]]; then
-  # Clones in temporary directory
-  git clone https://github.com/alexandru/copilot-config.git /tmp/copilot-config
-  echo
-  # Sync all the files from clone to your working dir
-  rsync -rcv /tmp/copilot-config/ ~/.copilot/
-  # Doing some index cleanup
-  cd ~/.copilot
-  git pull
-  # Cleanup
-  rm -rf /tmp/copilot-config
-else
-  git clone https://github.com/alexandru/copilot-config.git ~/.copilot
-fi
+```bash
+(
+  set -e
+  if [[ -d ~/.copilot ]]; then
+    # Clones in temporary directory
+    git clone https://github.com/alexandru/copilot-config.git /tmp/copilot-config
+    echo
+    # Sync all the files from clone to your working dir
+    rsync -rcv /tmp/copilot-config/ ~/.copilot/
+    # Doing some index cleanup
+    cd ~/.copilot
+    git pull
+    git config --local status.showUntrackedFiles no
+    # Cleanup
+    rm -rf /tmp/copilot-config
+  else
+    git clone https://github.com/alexandru/copilot-config.git ~/.copilot
+    git -C ~/.copilot config --local status.showUntrackedFiles no
+  fi
+)
 ```
 
 If the path isn't standard, you may need to set this in your `~/.zshrc`, `~/.bashrc` or `~/.profile`:
@@ -46,8 +52,7 @@ export COPILOT_HOME=/absolute/path/to/copilot-config
 ### Install the shared skills globally
 
 ```sh
-cd ~/.copilot
-make install-skills
+cd ~/.copilot && make install-skills
 ```
 
 The skills are installed under `~/.agents/skills`, where Copilot CLI,
@@ -59,7 +64,7 @@ OpenCode, Codex, and Pi can share them.
 
 ### Configure Bash/Zsh
 
-Some configurations can't be set in Copilot's files, so 
+Some configurations can't be set in Copilot's files, so
 define this useful alias in `~/.zshrc`, `~/.bashrc` or `~/.profile`...
 ```bash
 alias copilot='command copilot --agent Orchestrator --yolo'
@@ -71,7 +76,7 @@ alias copilot='command copilot --agent Orchestrator --yolo'
 
 ### Choose a configuration preset
 
-The [copilot-switch](./bin/copilot-switch.rs) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents). It's built with Rust 😎, so you need [rustup](https://rustup.rs/) installed. 
+The [copilot-switch](./bin/copilot-switch.rs) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents). It's built with Rust 😎, so you need [rustup](https://rustup.rs/) installed.
 
 ```sh
 # Example:
@@ -97,26 +102,38 @@ The switcher generates `settings.json` and `mcp-config.json` (Copilot's main con
 
 Install [Coursier](https://get-coursier.io/docs/cli-installation) first:
 
-```sh
+```bash
 ## MacOS
-brew install coursier/formulas/coursier
-cs setup
+brew install coursier/formulas/coursier && cs setup
+```
 
-## Linux x86-64 (aka AMD64)
-curl -fL "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz" | gzip -d > cs
+```bash
+(
+  set -eo pipefail
+  ## Linux x86-64 (aka AMD64)
+  curl -fL "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz" | gzip -d > cs
+)
+```
 
-## Linux ARM64
-curl -fL "https://github.com/VirtusLab/coursier-m1/releases/latest/download/cs-aarch64-pc-linux.gz" | gzip -d > cs
+```bash
+(
+  set -eo pipefail
+  ## Linux ARM64
+  curl -fL "https://github.com/VirtusLab/coursier-m1/releases/latest/download/cs-aarch64-pc-linux.gz" | gzip -d > cs
+)
 ```
 
 Then install Cellar via Coursier:
 
-```sh
-cs install --contrib cellar
-cellar --version
+```bash
+(
+  set -e
+  cs install --contrib cellar
+  cellar --version
 
-# Disable telemetry
-cellar telemetry disable
+  # Disable telemetry
+  cellar telemetry disable
+)
 ```
 </details>
 
