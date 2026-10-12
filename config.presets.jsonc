@@ -1,5 +1,8 @@
 // JSONC input: comments supported.
 {
+  "default": {
+    "extends": ["work-auto"],
+  },
   "work": {
     "settings.json": {
       "model": "claude-sonnet-5",

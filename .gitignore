@@ -4,6 +4,9 @@
 # .plans/ is intentionally NOT ignored.
 
 node_modules/
+.mypy_cache
+.ruff_cache
+__pycache__
 
 *.cache
 cache/

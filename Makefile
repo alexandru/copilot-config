@@ -1,12 +1,37 @@
-# Manual global skill installation. Never run automatically (no CI, no hooks).
-# Review upstream skill content before installation.
+# Bootstrap and manage the local Copilot CLI configuration.
+# The default target installs every missing prerequisite, generates the default
+# configuration when missing, and installs the shared skills globally. Never run
+# automatically (no CI, no hooks); review upstream skill content before installation.
+
+.NOTPARALLEL:
 
 ALEXANDRU_SKILLS_TAG := v11.0.4
 MATTPOCOCK_SKILLS_TAG := v1.3.1
 SKILLS_AGENT := github-copilot
 SKILLS_INSTALL_FLAGS := -g -a $(SKILLS_AGENT) -y
 
-.PHONY: install-skills update-skills check-mattpocock-skills-tag
+.PHONY: all install-pipx generate-config check-mattpocock-skills-tag install-skills update-skills test-copilot-switch
+
+all: install-pipx generate-config install-skills
+
+# copilot-switch runs through pipx.
+install-pipx:
+	@set -e; \
+	if command -v pipx >/dev/null 2>&1; then \
+		echo "pipx already installed: $$(pipx --version)"; exit 0; \
+	fi; \
+	case "$$(uname -s)" in \
+		Darwin) brew install pipx ;; \
+		Linux) sudo apt-get install -y pipx ;; \
+		*) echo "Unsupported platform: $$(uname -s)" >&2; exit 1 ;; \
+	esac
+
+generate-config:
+	@if [ -f settings.json ] && [ -f mcp-config.json ]; then \
+		echo "settings.json and mcp-config.json already exist; leaving them untouched"; \
+	else \
+		./bin/copilot-switch default; \
+	fi
 
 check-mattpocock-skills-tag:
 	@latest=$$(git ls-remote --tags --refs --sort=-version:refname https://github.com/mattpocock/skills.git 'v*' 2>/dev/null | sed -n '1s#.*refs/tags/##p'); \
@@ -46,3 +71,6 @@ install-skills:
 
 update-skills: check-mattpocock-skills-tag
 	$(MAKE) install-skills
+
+test-copilot-switch:
+	./bin/copilot-switch-test.py
