@@ -47,12 +47,12 @@ export COPILOT_HOME=/absolute/path/to/copilot-config
 </details>
 
 <details>
-<summary>STEP 2 — Install the shared skills globally</summary>
+<summary>STEP 2 — Install dependencies</summary>
 
-### Install the shared skills globally
+### Install dependencies
 
 ```sh
-cd ~/.copilot && make install-skills
+cd ~/.copilot && make
 ```
 
 The skills are installed under `~/.agents/skills`, where Copilot CLI,
@@ -72,9 +72,9 @@ alias copilot='command copilot --agent Orchestrator --yolo'
 </details>
 
 <details>
-<summary>STEP 4 — Choose a configuration preset</summary>
+<summary>STEP 4 — Choose a configuration preset (optional)</summary>
 
-### Choose a configuration preset
+### Choose a configuration preset (optional)
 
 The [copilot-switch](./bin/copilot-switch.py) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents). It's built with Python 🐍, so you need [pipx](https://pipx.pypa.io/) installed (`make install-pipx`).
 
@@ -88,9 +88,6 @@ The switcher generates `settings.json` and `mcp-config.json` (Copilot's main con
 - [settings.common.jsonc](./settings.common.jsonc)
 - [mcp-config.common.jsonc](./mcp-config.common.jsonc)
 - [config.presets.jsonc](./config.presets.jsonc)
-
-**WARNING:** Must run `copilot-switch` at least once, otherwise Copilot's configuration is missing!
-
 </details>
 
 <details>
