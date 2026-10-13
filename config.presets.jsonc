@@ -17,6 +17,10 @@
             "model": "claude-sonnet-5",
             "effortLevel": "high",
           },
+          "Analyst": {
+            "model": "claude-opus-5",
+            "effortLevel": "medium",
+          },
           "Junior": {
             "model": "claude-sonnet-5",
             "effortLevel": "low",
@@ -72,6 +76,10 @@
           "Solo": {
             "model": "gpt-6.1-sol",
             "effortLevel": "medium",
+          },
+          "Analyst": {
+            "model": "gpt-6.1-sol",
+            "effortLevel": "high",
           },
           "Junior": {
             "model": "gpt-6-luna",
@@ -148,13 +156,20 @@
     "extends": ["work"],
     "settings.json": {
       "model": "auto",
+      "effortLevel": "medium",
       "subagents": {
         "agents": {
           "Orchestrator": {
             "model": "auto",
+            "effortLevel": "medium",
           },
           "Solo": {
             "model": "auto",
+            "effortLevel": "medium",
+          },
+          "Analyst": {
+            "model": "auto",
+            "effortLevel": "high",
           },
         },
       },

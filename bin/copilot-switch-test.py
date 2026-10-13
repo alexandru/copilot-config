@@ -124,6 +124,7 @@ class ActiveAgentEntriesTest(unittest.TestCase):
                 "agents": {
                     "Orchestrator": {"model": "ignored"},
                     "Solo": {"model": "ignored"},
+                    "Analyst": {"model": "gpt-5.6-luna", "effortLevel": "high"},
                     "Junior": {"model": "gpt-5.6-luna", "effortLevel": "high"},
                     "Explorer": {"model": "gpt-5.6-luna"},
                     "task": {"model": "gpt-5.6-luna"},
@@ -141,6 +142,7 @@ class ActiveAgentEntriesTest(unittest.TestCase):
             [
                 ("Orchestrator", "gpt-5.6-sol", "medium"),
                 ("Solo", "gpt-5.6-sol", "medium"),
+                ("Analyst", "gpt-5.6-luna", "high"),
                 ("Junior", "gpt-5.6-luna", "high"),
                 ("Explorer", "gpt-5.6-luna", "-"),
             ],
