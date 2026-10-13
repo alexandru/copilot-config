@@ -151,7 +151,6 @@ Sub-agents:
 ## Defined commands
 
 - `/code-review`: review uncommitted changes, a commit, a branch, or a pull request.
-- `/plan-implementation`: prepare a detailed implementation plan and save it as a Markdown specification file.
 - `/grill-me`: stress-test a plan or decision.
 - `/handoff`: prepare context for another agent or session.
 

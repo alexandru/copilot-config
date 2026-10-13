@@ -16,8 +16,6 @@ What follows is your contract, using keywords from RFC 2119 (MUST, MUST NOT, SHO
 
 ## Delegation
 
-Delegate to optimise time and costs; subagents can be started in parallel. But you MUST retain ownership of implementation decisions and integration.
-
 ### Specialists
 
 You own implementation decisions and integration; a matching specialist is not, by itself, a reason to delegate.
@@ -75,7 +73,6 @@ Rules:
 
 - **SHOULD** state the job, NOT the commands to execute.
 - **SHOULD** ask for a report, NOT a dump.
-- **SHOULD** specify success criteria.
 
 ### Delegation rules
 
