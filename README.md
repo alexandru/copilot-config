@@ -148,20 +148,14 @@ Sub-agents:
 - [Explorer](./agents/Explorer.agent.md): read-only codebase evidence gathering.
 - [Librarian](./agents/Librarian.agent.md): read-only external documentation and dependency-source research.
 
-## Defined commands
-
-- `/code-review`: review uncommitted changes, a commit, a branch, or a pull request.
-- `/grill-me`: stress-test a plan or decision.
-- `/handoff`: prepare context for another agent or session.
-
 ## Shared skills
 
 - [alexandru/skills](https://github.com/alexandru/skills/tree/v10.2.0)
   - `code-review`: user-invoked adapter for `code-reviewing`.
   - `code-reviewing`: review changed code for bugs, structural problems, performance issues, and unintended behavior.
   - `mcp-access`: access MCP servers when native MCP tools are unavailable or unsupported.
-  - `simplicity`: simplification lenses of constraints, simplicity, and parametricity.
-  - `simplify`: behavior-preserving simplification using the `simplicity` lenses.
+  - `refine`: behavior-preserving refinement using the `refinements` lenses.
+  - `refinements`: refinement lenses of constraints, simplicity, and parametricity.
 - [mattpocock/skills](https://github.com/mattpocock/skills/tree/v1.3.1)
   - `codebase-design`: deep-module design vocabulary and principles.
   - `diagnosing-bugs`: disciplined diagnosis for hard bugs and regressions.

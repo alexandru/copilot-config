@@ -1,6 +1,5 @@
 # Local/runtime Copilot artifacts only — never source configuration.
-# Tracked on purpose: agents/, the command adapters under skills/, README.md,
-# Makefile, package.json, and test/.
+# Tracked on purpose: agents/, README.md, Makefile, package.json, and test/.
 # .plans/ is intentionally NOT ignored.
 
 node_modules/
