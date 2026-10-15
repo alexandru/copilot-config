@@ -26,10 +26,12 @@
             "effortLevel": "low",
           },
           "Explorer": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-sonnet-5",
+            "effortLevel": "low",
           },
           "Librarian": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-sonnet-5",
+            "effortLevel": "low",
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
@@ -166,10 +168,6 @@
           "Solo": {
             "model": "auto",
             "effortLevel": "medium",
-          },
-          "Analyst": {
-            "model": "auto",
-            "effortLevel": "high",
           },
         },
       },
