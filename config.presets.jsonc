@@ -11,22 +11,22 @@
         "agents": {
           "Orchestrator": {
             "model": "claude-sonnet-5",
-            "effortLevel": "high",
+            "effortLevel": "medium",
           },
           "Solo": {
             "model": "claude-sonnet-5",
-            "effortLevel": "high",
+            "effortLevel": "medium",
           },
           "Analyst": {
-            "model": "claude-opus-5",
-            "effortLevel": "medium",
+            "model": "claude-sonnet-5",
+            "effortLevel": "xhigh",
           },
           "Junior": {
             "model": "claude-sonnet-5",
             "effortLevel": "low",
           },
           "Explorer": {
-            "model": "claude-sonnet-5",
+            "model": "claude-haiku-4.5",
             "effortLevel": "low",
           },
           "Librarian": {
