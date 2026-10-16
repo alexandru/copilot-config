@@ -187,6 +187,7 @@ class AgentEntry:
     name: str
     model: str
     effort: str
+    context_tier: str
 
 
 def disabled_subagents(settings: JsonObject) -> set[str]:
@@ -209,8 +210,14 @@ def active_agent_entries(settings: JsonObject) -> list[AgentEntry]:
     """
     default_model = string_field(settings, "model", "-")
     default_effort = string_field(settings, "effortLevel", "-")
+    default_context_tier = string_field(settings, "contextTier", "-")
     entries = [
-        AgentEntry(name=name, model=default_model, effort=default_effort)
+        AgentEntry(
+            name=name,
+            model=default_model,
+            effort=default_effort,
+            context_tier=default_context_tier,
+        )
         for name in PRIMARY_AGENTS
     ]
 
@@ -225,6 +232,7 @@ def active_agent_entries(settings: JsonObject) -> list[AgentEntry]:
                         name=name,
                         model=string_field(config, "model", "-"),
                         effort=string_field(config, "effortLevel", "-"),
+                        context_tier=string_field(config, "contextTier", "-"),
                     )
                 )
     return entries
@@ -238,12 +246,22 @@ def print_agent_table(entries: list[AgentEntry]) -> None:
     name_width = column_width("Agent", (entry.name for entry in entries))
     model_width = column_width("Model", (entry.model for entry in entries))
     effort_width = column_width("Effort", (entry.effort for entry in entries))
+    context_tier_width = column_width(
+        "Context Tier", (entry.context_tier for entry in entries)
+    )
 
-    print(f"  {'Agent':<{name_width}} │ {'Model':<{model_width}} │ Effort")
-    print(f"  {'─' * name_width}─┼─{'─' * model_width}─┼─{'─' * effort_width}")
+    print(
+        f"  {'Agent':<{name_width}} │ {'Model':<{model_width}} │ "
+        f"{'Effort':<{effort_width}} │ Context Tier"
+    )
+    print(
+        f"  {'─' * name_width}─┼─{'─' * model_width}─┼─"
+        f"{'─' * effort_width}─┼─{'─' * context_tier_width}"
+    )
     for entry in entries:
         print(
-            f"  {entry.name:<{name_width}} │ {entry.model:<{model_width}} │ {entry.effort}"
+            f"  {entry.name:<{name_width}} │ {entry.model:<{model_width}} │ "
+            f"{entry.effort:<{effort_width}} │ {entry.context_tier}"
         )
 
 
@@ -277,7 +295,7 @@ def switch(preset_name: str | None) -> None:
 
     entries = active_agent_entries(settings)
     if entries:
-        print("Subagents:")
+        print("Agents:")
         print()
         print_agent_table(entries)
     print()

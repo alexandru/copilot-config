@@ -124,7 +124,11 @@ class ActiveAgentEntriesTest(unittest.TestCase):
                 "agents": {
                     "Orchestrator": {"model": "ignored"},
                     "Solo": {"model": "ignored"},
-                    "Analyst": {"model": "gpt-5.6-luna", "effortLevel": "high"},
+                    "Analyst": {
+                        "model": "gpt-5.6-luna",
+                        "effortLevel": "high",
+                        "contextTier": "long_context",
+                    },
                     "Junior": {"model": "gpt-5.6-luna", "effortLevel": "high"},
                     "Explorer": {"model": "gpt-5.6-luna"},
                     "task": {"model": "gpt-5.6-luna"},
@@ -138,13 +142,16 @@ class ActiveAgentEntriesTest(unittest.TestCase):
         entries = tool.active_agent_entries(settings)
 
         self.assertEqual(
-            [(entry.name, entry.model, entry.effort) for entry in entries],
             [
-                ("Orchestrator", "gpt-5.6-sol", "medium"),
-                ("Solo", "gpt-5.6-sol", "medium"),
-                ("Analyst", "gpt-5.6-luna", "high"),
-                ("Junior", "gpt-5.6-luna", "high"),
-                ("Explorer", "gpt-5.6-luna", "-"),
+                (entry.name, entry.model, entry.effort, entry.context_tier)
+                for entry in entries
+            ],
+            [
+                ("Orchestrator", "gpt-5.6-sol", "medium", "-"),
+                ("Solo", "gpt-5.6-sol", "medium", "-"),
+                ("Analyst", "gpt-5.6-luna", "high", "long_context"),
+                ("Junior", "gpt-5.6-luna", "high", "-"),
+                ("Explorer", "gpt-5.6-luna", "-", "-"),
             ],
         )
 
