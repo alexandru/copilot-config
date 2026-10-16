@@ -9,10 +9,14 @@ ALEXANDRU_SKILLS_TAG := v11.1.0
 MATTPOCOCK_SKILLS_TAG := v1.3.1
 SKILLS_AGENT := github-copilot
 SKILLS_INSTALL_FLAGS := -g -a $(SKILLS_AGENT) -y
+COURSIER_LINUX_X86_64_URL := https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz
+COURSIER_LINUX_AARCH64_URL := https://github.com/VirtusLab/coursier-m1/releases/latest/download/cs-aarch64-pc-linux.gz
+# Coursier installs launchers outside the default PATH of a non-login shell.
+COURSIER_BIN_PATHS := $(HOME)/.local/bin:$(HOME)/.local/share/coursier/bin:$(HOME)/Library/Application Support/Coursier/bin
 
-.PHONY: all install-pipx generate-config check-mattpocock-skills-tag install-skills update-skills test-copilot-switch
+.PHONY: all install-pipx generate-config check-mattpocock-skills-tag install-skills update-skills install-coursier install-cellar test-copilot-switch
 
-all: install-pipx generate-config install-skills
+all: install-pipx generate-config install-skills install-cellar
 
 # copilot-switch runs through pipx.
 install-pipx:
@@ -71,6 +75,46 @@ install-skills:
 
 update-skills: check-mattpocock-skills-tag
 	$(MAKE) install-skills
+
+# The cellar skill shells out to the cellar CLI, installed through Coursier.
+install-coursier:
+	@set -e; \
+	export PATH="$(COURSIER_BIN_PATHS):$$PATH"; \
+	if command -v cs >/dev/null 2>&1; then \
+		echo "coursier already installed: $$(cs version)"; exit 0; \
+	elif command -v coursier >/dev/null 2>&1; then \
+		echo "coursier already installed: $$(coursier version)"; exit 0; \
+	fi; \
+	case "$$(uname -s)" in \
+		Darwin) \
+			brew install coursier; \
+			coursier setup --yes ;; \
+		Linux) \
+			case "$$(uname -m)" in \
+				x86_64|amd64) url="$(COURSIER_LINUX_X86_64_URL)" ;; \
+				aarch64|arm64) url="$(COURSIER_LINUX_AARCH64_URL)" ;; \
+				*) echo "Unsupported architecture: $$(uname -m)" >&2; exit 1 ;; \
+			esac; \
+			mkdir -p "$$HOME/.local/bin"; \
+			archive=$$(mktemp); \
+			trap 'rm -f "$$archive"' 0; \
+			curl -fL "$$url" -o "$$archive"; \
+			gzip -dc "$$archive" > "$$HOME/.local/bin/cs"; \
+			chmod +x "$$HOME/.local/bin/cs"; \
+			"$$HOME/.local/bin/cs" setup --yes ;; \
+		*) echo "Unsupported platform: $$(uname -s)" >&2; exit 1 ;; \
+	esac
+
+install-cellar: install-coursier
+	@set -e; \
+	export PATH="$(COURSIER_BIN_PATHS):$$PATH"; \
+	if command -v cellar >/dev/null 2>&1; then \
+		echo "cellar already installed: $$(cellar --version)"; exit 0; \
+	fi; \
+	if command -v cs >/dev/null 2>&1; then cs=cs; else cs=coursier; fi; \
+	"$$cs" install --contrib cellar; \
+	cellar --version; \
+	cellar telemetry disable --global
 
 test-copilot-switch:
 	./bin/copilot-switch-test.py
