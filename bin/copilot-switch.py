@@ -182,6 +182,16 @@ def string_field(config: Json, key: str, default: str) -> str:
     return value if isinstance(value, str) else default
 
 
+def effective_effort(model: str, effort_level: str, auto_tier: str) -> str:
+    """The reasoning-depth value worth displaying for this agent.
+
+    An auto-routed model picks its own reasoning depth per request, so a
+    configured effortLevel has no visible effect; the Auto routing tier is
+    what actually governs cost/quality tradeoffs in that case.
+    """
+    return auto_tier if model == "auto" else effort_level
+
+
 @dataclass(frozen=True)
 class AgentEntry:
     name: str
@@ -206,16 +216,20 @@ def disabled_subagents(settings: JsonObject) -> set[str]:
 
 def active_agent_entries(settings: JsonObject) -> list[AgentEntry]:
     """Primary agents first with the top-level model, then enabled subagents in
-    configuration order.
+    configuration order. The Effort column shows the Auto routing tier instead
+    of effortLevel for any agent whose effective model is "auto", since
+    autoTier is the only setting that applies there (there is no per-agent
+    autoTier override).
     """
     default_model = string_field(settings, "model", "-")
     default_effort = string_field(settings, "effortLevel", "-")
     default_context_tier = string_field(settings, "contextTier", "-")
+    auto_tier = string_field(settings, "autoTier", "-")
     entries = [
         AgentEntry(
             name=name,
             model=default_model,
-            effort=default_effort,
+            effort=effective_effort(default_model, default_effort, auto_tier),
             context_tier=default_context_tier,
         )
         for name in PRIMARY_AGENTS
@@ -227,11 +241,13 @@ def active_agent_entries(settings: JsonObject) -> list[AgentEntry]:
     if isinstance(agents, dict):
         for name, config in agents.items():
             if name not in disabled and name not in PRIMARY_AGENTS:
+                agent_model = string_field(config, "model", "-")
+                agent_effort = string_field(config, "effortLevel", "-")
                 entries.append(
                     AgentEntry(
                         name=name,
-                        model=string_field(config, "model", "-"),
-                        effort=string_field(config, "effortLevel", "-"),
+                        model=agent_model,
+                        effort=effective_effort(agent_model, agent_effort, auto_tier),
                         context_tier=string_field(config, "contextTier", "-"),
                     )
                 )
@@ -290,7 +306,8 @@ def switch(preset_name: str | None) -> None:
     model = settings.get("model")
     if isinstance(model, str) and model:
         effort = string_field(settings, "effortLevel", "default")
-        print(f"Default model: {model} ({effort})")
+        auto_tier = string_field(settings, "autoTier", "default")
+        print(f"Default model: {model} ({effective_effort(model, effort, auto_tier)})")
         print()
 
     entries = active_agent_entries(settings)

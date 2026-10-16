@@ -155,6 +155,39 @@ class ActiveAgentEntriesTest(unittest.TestCase):
             ],
         )
 
+    def test_shows_auto_tier_instead_of_effort_level_for_auto_model(self) -> None:
+        settings = {
+            "model": "auto",
+            "effortLevel": "medium",
+            "autoTier": "balance",
+            "subagents": {
+                "agents": {
+                    "Orchestrator": {"model": "ignored"},
+                    "Solo": {"model": "ignored"},
+                    "Analyst": {"model": "gpt-5.6-luna", "effortLevel": "high"},
+                },
+            },
+        }
+
+        entries = tool.active_agent_entries(settings)
+
+        self.assertEqual(
+            [(entry.name, entry.model, entry.effort) for entry in entries],
+            [
+                ("Orchestrator", "auto", "balance"),
+                ("Solo", "auto", "balance"),
+                ("Analyst", "gpt-5.6-luna", "high"),
+            ],
+        )
+
+
+class EffectiveEffortTest(unittest.TestCase):
+    def test_uses_effort_level_for_a_pinned_model(self) -> None:
+        self.assertEqual(tool.effective_effort("gpt-5.6-sol", "high", "balance"), "high")
+
+    def test_uses_auto_tier_for_the_auto_model(self) -> None:
+        self.assertEqual(tool.effective_effort("auto", "high", "balance"), "balance")
+
 
 class ReadJsoncTest(unittest.TestCase):
     def test_reads_comments_and_trailing_commas(self) -> None:
