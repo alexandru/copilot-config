@@ -95,7 +95,7 @@ The switcher generates `settings.json` and `mcp-config.json` (Copilot's main con
 
 ### Install Cellar (optional)
 
-[Cellar](https://github.com/VirtusLab/cellar) is useful for JVM dependency API lookup, and this repo's [Makefile](./Makefile) also installs its associated skill.
+[Cellar](https://github.com/VirtusLab/cellar) is useful for JVM dependency API lookup. The default `make` target installs it and its associated skill.
 
 Install [Coursier](https://get-coursier.io/docs/cli-installation) first:
 
@@ -150,12 +150,12 @@ Sub-agents:
 
 ## Shared skills
 
-- [alexandru/skills](https://github.com/alexandru/skills/tree/v10.2.0)
+- [alexandru/skills](https://github.com/alexandru/skills/tree/v12.0.0)
   - `code-review`: user-invoked adapter for `code-reviewing`.
   - `code-reviewing`: review changed code for bugs, structural problems, performance issues, and unintended behavior.
   - `mcp-access`: access MCP servers when native MCP tools are unavailable or unsupported.
-  - `refine`: behavior-preserving refinement using the `refinements` lenses.
-  - `refinements`: refinement lenses of constraints, simplicity, and parametricity.
+  - `code-refine`: behavior-preserving refinement using the `code-refinements` lenses.
+  - `code-refinements`: refinement lenses of constraints, simplicity, and parametricity.
 - [mattpocock/skills](https://github.com/mattpocock/skills/tree/v1.3.1)
   - `codebase-design`: deep-module design vocabulary and principles.
   - `diagnosing-bugs`: disciplined diagnosis for hard bugs and regressions.
@@ -175,8 +175,6 @@ Sub-agents:
   - `cellar`: query the APIs of JVM dependencies (Scala, Java).
 - [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)
   - `caveman`: token-efficient response modes with preserved technical accuracy.
-- [cursor/plugins](https://github.com/cursor/plugins/tree/main/pstack/skills/unslop)
-  - `unslop`: remove AI writing patterns and add a human voice.
 - [brave/brave-search-skills](https://github.com/brave/brave-search-skills)
   - `web-search`: ranked web search with snippets and rich metadata.
 
