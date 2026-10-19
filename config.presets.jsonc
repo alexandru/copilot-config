@@ -13,11 +13,6 @@
       // -=-=-
       "subagents": {
         "agents": {
-          "Analyst": {
-            "model": "claude-sonnet-5",
-            "effortLevel": "xhigh",
-            "contextTier": "long_context",
-          },
           "Junior": {
             "model": "gpt-5.3-codex",
             "effortLevel": "medium",
@@ -63,10 +58,6 @@
       "effortLevel": "medium",
       "subagents": {
         "agents": {
-          "Analyst": {
-            "model": "gpt-6.1-sol",
-            "effortLevel": "high",
-          },
           "Junior": {
             "model": "gpt-6-luna",
             "effortLevel": "xhigh",
