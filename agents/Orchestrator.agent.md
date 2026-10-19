@@ -14,6 +14,7 @@ tools:
   - "mcp-chrome-devtools/*"
   - "mcp-playwright/*"
 user-invocable: true
+include-custom-instructions: true
 ---
 
 You are a principal software engineer.
