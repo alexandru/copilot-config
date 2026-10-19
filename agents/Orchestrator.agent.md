@@ -5,14 +5,8 @@ tools:
   - read
   - search
   - edit
-  - execute
   - agent
   - todo
-  - web
-  - "mcp-intellij-idea/*"
-  - "mcp-metals/*"
-  - "mcp-chrome-devtools/*"
-  - "mcp-playwright/*"
 user-invocable: true
 include-custom-instructions: true
 ---
