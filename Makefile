@@ -69,7 +69,6 @@ install-skills:
 		to-tickets
 	npx skills add https://github.com/VirtusLab/cellar/ $(SKILLS_INSTALL_FLAGS)
 	npx skills add https://github.com/JuliusBrussee/caveman $(SKILLS_INSTALL_FLAGS) --skill caveman
-	npx skills add https://github.com/brave/brave-search-skills $(SKILLS_INSTALL_FLAGS) --skill web-search
 	@echo "Shared skills installed in ~/.agents/skills."
 
 update-skills: check-mattpocock-skills-tag

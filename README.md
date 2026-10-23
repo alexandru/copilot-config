@@ -174,8 +174,6 @@ Sub-agents:
   - `cellar`: query the APIs of JVM dependencies (Scala, Java).
 - [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)
   - `caveman`: token-efficient response modes with preserved technical accuracy.
-- [brave/brave-search-skills](https://github.com/brave/brave-search-skills)
-  - `web-search`: ranked web search with snippets and rich metadata.
 
 ## Updating shared skills
 
