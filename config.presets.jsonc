@@ -13,20 +13,9 @@
       // -=-=-
       "subagents": {
         "agents": {
-          "Analyst": {
-            "model": "claude-opus-5",
-            "effortLevel": "medium",
-            "contextTier": "long_context",
-          },
           "Junior": {
             "model": "gpt-5.3-codex",
             "effortLevel": "low",
-          },
-          "Explorer": {
-            "model": "claude-haiku-4.5",
-          },
-          "Librarian": {
-            "model": "claude-haiku-4.5",
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
@@ -63,21 +52,9 @@
       "effortLevel": "medium",
       "subagents": {
         "agents": {
-          "Analyst": {
-            "model": "gpt-6.1-sol",
-            "effortLevel": "high",
-          },
           "Junior": {
             "model": "gpt-6-luna",
             "effortLevel": "xhigh",
-          },
-          "Explorer": {
-            "model": "gpt-6-luna",
-            "effortLevel": "high",
-          },
-          "Librarian": {
-            "model": "gpt-6-luna",
-            "effortLevel": "high",
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {

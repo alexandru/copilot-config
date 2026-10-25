@@ -124,17 +124,12 @@ class ActiveAgentEntriesTest(unittest.TestCase):
                 "agents": {
                     "Orchestrator": {"model": "ignored"},
                     "Solo": {"model": "ignored"},
-                    "Analyst": {
-                        "model": "claude-opus-5",
-                        "effortLevel": "medium",
-                        "contextTier": "long_context",
-                    },
                     "Junior": {
                         "model": "gpt-5.6-luna",
                         "effortLevel": "high",
                         "contextTier": "long_context",
                     },
-                    "Explorer": {"model": "gpt-5.6-luna"},
+                    "explore": {"model": "gpt-5.6-luna"},
                     "task": {"model": "gpt-5.6-luna"},
                     "code-review": {"model": "gpt-5.6-luna"},
                     "rubber-duck": {"model": "gpt-5.6-luna"},
@@ -153,9 +148,8 @@ class ActiveAgentEntriesTest(unittest.TestCase):
             [
                 ("Orchestrator", "gpt-5.6-sol", "medium", "-"),
                 ("Solo", "gpt-5.6-sol", "medium", "-"),
-                ("Analyst", "claude-opus-5", "medium", "long_context"),
                 ("Junior", "gpt-5.6-luna", "high", "long_context"),
-                ("Explorer", "gpt-5.6-luna", "-", "-"),
+                ("explore", "gpt-5.6-luna", "-", "-"),
             ],
         )
 
@@ -168,7 +162,6 @@ class ActiveAgentEntriesTest(unittest.TestCase):
                 "agents": {
                     "Orchestrator": {"model": "ignored"},
                     "Solo": {"model": "ignored"},
-                    "Analyst": {"model": "gpt-6.1-sol", "effortLevel": "high"},
                     "Junior": {"model": "gpt-5.6-luna", "effortLevel": "high"},
                 },
             },
@@ -181,7 +174,6 @@ class ActiveAgentEntriesTest(unittest.TestCase):
             [
                 ("Orchestrator", "auto", "balance"),
                 ("Solo", "auto", "balance"),
-                ("Analyst", "gpt-6.1-sol", "high"),
                 ("Junior", "gpt-5.6-luna", "high"),
             ],
         )
