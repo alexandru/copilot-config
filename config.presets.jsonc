@@ -7,9 +7,9 @@
     "settings.json": {
       // -----
       // Orchestrator / Solo configuration (main agents)
-      "model": "claude-sonnet-5",
-      "effortLevel": "medium",
-      "contextTier": "long_context",
+      "model": "gpt-5.3-codex",
+      "effortLevel": "high",
+      // "contextTier": "long_context",
       // -=-=-
       "subagents": {
         "agents": {
@@ -20,7 +20,7 @@
           },
           "Junior": {
             "model": "gpt-5.3-codex",
-            "effortLevel": "medium",
+            "effortLevel": "low",
           },
           "Explorer": {
             "model": "claude-haiku-4.5",
