@@ -147,12 +147,13 @@ Sub-agents:
 
 ## Shared skills
 
-- [alexandru/skills](https://github.com/alexandru/skills/tree/v13.1.1)
+- [alexandru/skills](https://github.com/alexandru/skills/tree/v13.2.1)
   - `code-review`: user-invoked adapter for `code-reviewing`.
   - `code-reviewing`: review changed code for bugs, structural problems, performance issues, and unintended behavior.
   - `mcp-access`: access MCP servers when native MCP tools are unavailable or unsupported.
   - `code-refine`: behavior-preserving refinement using the `code-refinements` lenses.
   - `code-refinements`: refinement lenses of constraints, simplicity, and parametricity.
+  - `external-research`: research external documentation, public repositories, and dependency artifacts with a persistent cache.
 - [mattpocock/skills](https://github.com/mattpocock/skills/tree/v1.3.1)
   - `codebase-design`: deep-module design vocabulary and principles.
   - `diagnosing-bugs`: disciplined diagnosis for hard bugs and regressions.
