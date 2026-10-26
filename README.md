@@ -26,7 +26,7 @@ git clone https://github.com/alexandru/copilot-config.git ~/.copilot &&
     git clone https://github.com/alexandru/copilot-config.git /tmp/copilot-config
     echo
     # Sync all the files from clone to your working dir
-    rsync -rcv /tmp/copilot-config/ ~/.copilot/
+    rsync -rlcv /tmp/copilot-config/ ~/.copilot/
     # Doing some index cleanup
     cd ~/.copilot
     git pull
@@ -147,7 +147,7 @@ Sub-agents:
 
 ## Shared skills
 
-- [alexandru/skills](https://github.com/alexandru/skills/tree/v13.2.1)
+- [alexandru/skills](https://github.com/alexandru/skills/tree/v13.2.2)
   - `code-review`: user-invoked adapter for `code-reviewing`.
   - `code-reviewing`: review changed code for bugs, structural problems, performance issues, and unintended behavior.
   - `mcp-access`: access MCP servers when native MCP tools are unavailable or unsupported.
