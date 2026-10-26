@@ -5,54 +5,17 @@ Part of [alexandru/agents-config](https://github.com/alexandru/agents-config).
 ## Installation
 
 <details>
-<summary>STEP 1 — Clone the repository</summary>
+<summary>STEP 1 — Install</summary>
 
-### Clone the repository
-
-**WARN** — This is for a fresh Copilot installation (no history):
-
-```sh
-git clone https://github.com/alexandru/copilot-config.git ~/.copilot &&
-  git -C ~/.copilot config --local status.showUntrackedFiles no
-```
-
-**WARN:** This is your Copilot's working directory, so you may already have a `~/.copilot` that you may need to delete, in which case you could lose all your sessions. An alternative would be...
+### Install
 
 ```bash
-(
-  set -e
-  if [[ -d ~/.copilot ]]; then
-    # Clones in temporary directory
-    git clone https://github.com/alexandru/copilot-config.git /tmp/copilot-config
-    echo
-    # Sync all the files from clone to your working dir
-    rsync -rlcv /tmp/copilot-config/ ~/.copilot/
-    # Doing some index cleanup
-    cd ~/.copilot
-    git pull
-    git config --local status.showUntrackedFiles no
-    # Cleanup
-    rm -rf /tmp/copilot-config
-  else
-    git clone https://github.com/alexandru/copilot-config.git ~/.copilot
-    git -C ~/.copilot config --local status.showUntrackedFiles no
-  fi
-)
+curl -fsSL https://alexandru.github.io/copilot-config/install.sh | bash
 ```
 
 If the path isn't standard, you may need to set this in your `~/.zshrc`, `~/.bashrc` or `~/.profile`:
 ```sh
 export COPILOT_HOME=/absolute/path/to/copilot-config
-```
-</details>
-
-<details>
-<summary>STEP 2 — Install dependencies</summary>
-
-### Install dependencies
-
-```sh
-cd ~/.copilot && make
 ```
 
 The skills are installed under `~/.agents/skills`, where Copilot CLI,
@@ -60,7 +23,7 @@ OpenCode, Codex, and Pi can share them.
 </details>
 
 <details>
-<summary>STEP 3 — Configure Bash/Zsh</summary>
+<summary>STEP 2 — Configure Bash/Zsh</summary>
 
 ### Configure Bash/Zsh
 
@@ -72,7 +35,7 @@ alias copilot='command copilot --agent Orchestrator --yolo'
 </details>
 
 <details>
-<summary>STEP 4 — Choose a configuration preset (optional)</summary>
+<summary>STEP 3 — Choose a configuration preset (optional)</summary>
 
 ### Choose a configuration preset (optional)
 
@@ -80,7 +43,7 @@ The [copilot-switch](./bin/copilot-switch.py) utility is for quickly switching b
 
 ```sh
 # Example:
-./bin/copilot-switch work
+~/.copilot/bin/copilot-switch work
 ```
 
 The switcher generates `settings.json` and `mcp-config.json` (Copilot's main configuration files) from:
@@ -91,7 +54,7 @@ The switcher generates `settings.json` and `mcp-config.json` (Copilot's main con
 </details>
 
 <details>
-<summary>STEP 5 — Install Cellar (optional)</summary>
+<summary>STEP 4 — Install Cellar (optional)</summary>
 
 ### Install Cellar (optional)
 
