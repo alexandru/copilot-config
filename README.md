@@ -39,7 +39,7 @@ alias copilot='command copilot --agent Orchestrator --yolo'
 
 ### Choose a configuration preset (optional)
 
-The [copilot-switch](./bin/copilot-switch.py) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents). It's built with Python 🐍, so you need [pipx](https://pipx.pypa.io/) installed (`make install-pipx`).
+The [copilot-switch](./bin/copilot-switch.py) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents).
 
 ```sh
 # Example:
@@ -51,50 +51,6 @@ The switcher generates `settings.json` and `mcp-config.json` (Copilot's main con
 - [settings.common.jsonc](./settings.common.jsonc)
 - [mcp-config.common.jsonc](./mcp-config.common.jsonc)
 - [config.presets.jsonc](./config.presets.jsonc)
-</details>
-
-<details>
-<summary>STEP 4 — Install Cellar (optional)</summary>
-
-### Install Cellar (optional)
-
-[Cellar](https://github.com/VirtusLab/cellar) is useful for JVM dependency API lookup. The default `make` target installs it and its associated skill.
-
-Install [Coursier](https://get-coursier.io/docs/cli-installation) first:
-
-```bash
-## MacOS
-brew install coursier/formulas/coursier && cs setup
-```
-
-```bash
-(
-  set -eo pipefail
-  ## Linux x86-64 (aka AMD64)
-  curl -fL "https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz" | gzip -d > cs
-)
-```
-
-```bash
-(
-  set -eo pipefail
-  ## Linux ARM64
-  curl -fL "https://github.com/VirtusLab/coursier-m1/releases/latest/download/cs-aarch64-pc-linux.gz" | gzip -d > cs
-)
-```
-
-Then install Cellar via Coursier:
-
-```bash
-(
-  set -e
-  cs install --contrib cellar
-  cellar --version
-
-  # Disable telemetry
-  cellar telemetry disable
-)
-```
 </details>
 
 ## Defined agents
