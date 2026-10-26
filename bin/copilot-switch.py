@@ -218,8 +218,8 @@ def active_agent_entries(settings: JsonObject) -> list[AgentEntry]:
     """Primary agents first with the top-level model, then enabled subagents in
     configuration order. The Effort column shows the Auto routing tier instead
     of effortLevel for any agent whose effective model is "auto", since
-    autoTier is the only setting that applies there (there is no per-agent
-    autoTier override).
+    autoTier is the only setting that applies there; a per-agent autoTier
+    overrides the top-level one.
     """
     default_model = string_field(settings, "model", "-")
     default_effort = string_field(settings, "effortLevel", "-")
@@ -243,11 +243,14 @@ def active_agent_entries(settings: JsonObject) -> list[AgentEntry]:
             if name not in disabled and name not in PRIMARY_AGENTS:
                 agent_model = string_field(config, "model", "-")
                 agent_effort = string_field(config, "effortLevel", "-")
+                agent_auto_tier = string_field(config, "autoTier", auto_tier)
                 entries.append(
                     AgentEntry(
                         name=name,
                         model=agent_model,
-                        effort=effective_effort(agent_model, agent_effort, auto_tier),
+                        effort=effective_effort(
+                            agent_model, agent_effort, agent_auto_tier
+                        ),
                         context_tier=string_field(config, "contextTier", "-"),
                     )
                 )

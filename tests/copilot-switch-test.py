@@ -179,6 +179,34 @@ class ActiveAgentEntriesTest(unittest.TestCase):
         )
 
 
+    def test_prefers_a_per_agent_auto_tier_over_the_top_level_one(self) -> None:
+        settings = {
+            "model": "auto",
+            "effortLevel": "medium",
+            "autoTier": "balance",
+            "subagents": {
+                "agents": {
+                    "Junior": {
+                        "model": "auto",
+                        "effortLevel": "low",
+                        "autoTier": "efficiency",
+                    },
+                },
+            },
+        }
+
+        entries = tool.active_agent_entries(settings)
+
+        self.assertEqual(
+            [(entry.name, entry.model, entry.effort) for entry in entries],
+            [
+                ("Orchestrator", "auto", "balance"),
+                ("Solo", "auto", "balance"),
+                ("Junior", "auto", "efficiency"),
+            ],
+        )
+
+
 class EffectiveEffortTest(unittest.TestCase):
     def test_uses_effort_level_for_a_pinned_model(self) -> None:
         self.assertEqual(tool.effective_effort("gpt-5.6-sol", "high", "balance"), "high")

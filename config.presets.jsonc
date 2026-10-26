@@ -120,8 +120,15 @@
     "settings.json": {
       "model": "auto",
       "effortLevel": "medium",
-      "contextTier": "default",
       "autoTier": "balance",
+      "subagents": {
+        "agents": {
+          "Junior": {
+            "model": "auto",
+            "autoTier": "efficiency",
+          },
+        }
+      }
     },
     "mcp-config.json": {},
   },
@@ -129,8 +136,15 @@
     "extends": ["personal"],
     "settings.json": {
       "model": "auto",
-      "contextTier": "default",
       "autoTier": "balance",
+      "subagents": {
+        "agents": {
+          "Junior": {
+            "model": "auto",
+            "autoTier": "efficiency",
+          },
+        }
+      }
     },
     "mcp-config.json": {},
   },

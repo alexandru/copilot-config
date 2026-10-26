@@ -31,3 +31,4 @@ session-store.db-wal
 settings.json
 sidebar-sessions-state/
 vscode.session.*
+settings.json.lock
