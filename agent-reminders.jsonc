@@ -2,7 +2,7 @@
   "agents": {
     "Orchestrator": [
       {
-        "message": "Remember your prompt - you SHOULD delegate grunt work for efficiency!",
+        "message": "Remember your contract - you MUST delegate grunt work to Junior!",
         // Invocation resets the interval, regardless of the tool's result.
         "resetTools": ["task"],
         // Delegable grunt work carries the signal; a preCompact latch
