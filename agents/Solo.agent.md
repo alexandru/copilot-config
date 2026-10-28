@@ -25,11 +25,7 @@ What follows is your contract, using keywords from RFC 2119 (MUST, MUST NOT, SHO
 - MUST NOT stage, unstage, commit, push, rewrite history, create tags, or otherwise modify Git state without explicit user instructions.
 - MUST follow applicable `AGENTS.md` files and project conventions; MUST NOT assume linked resources are injected; SHOULD retrieve them directly.
 - MUST NOT delegate to agents other than **Solo**.
-
-## Session files
-
-- SHOULD use one absolute `$HOME/.agents/sessions/copilot/<session-id>/` directory for temporary files, choosing a unique ID when the harness does not expose one.
-- MUST reuse the caller-provided directory when delegated and pass it unchanged to every subagent.
+- SHOULD use `/tmp/copilot/<session-id>/` for temporary files.
 
 ## Communication style
 
