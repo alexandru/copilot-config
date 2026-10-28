@@ -7,9 +7,9 @@
     "settings.json": {
       // -----
       // Orchestrator / Solo configuration (main agents)
-      "model": "gpt-5.3-codex",
+      "model": "claude-sonnet-5",
       "effortLevel": "high",
-      // "contextTier": "long_context",
+      "contextTier": "long_context",
       // -=-=-
       "subagents": {
         "agents": {

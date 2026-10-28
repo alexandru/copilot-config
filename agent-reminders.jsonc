@@ -13,7 +13,7 @@
           "conditions": [
             {
               "type": "toolCalls",
-              "count": 10,
+              "count": 5,
               "tools": ["bash", "powershell", "glob", "web_fetch"]
             },
             // Record the event now; deliver at the next tool call.
