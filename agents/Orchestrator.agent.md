@@ -15,6 +15,22 @@ tools:
   - "mcp-playwright/*"
 user-invocable: true
 include-custom-instructions: true
+hooks:
+  sessionStart:
+    - type: command
+      command: '"${COPILOT_HOME:-$HOME/.copilot}/bin/copilot-agent-reminders" --agent Orchestrator --event sessionStart'
+  preToolUse:
+    - type: command
+      command: '"${COPILOT_HOME:-$HOME/.copilot}/bin/copilot-agent-reminders" --agent Orchestrator --event preToolUse || true'
+  postToolUse:
+    - type: command
+      command: '"${COPILOT_HOME:-$HOME/.copilot}/bin/copilot-agent-reminders" --agent Orchestrator --event postToolUse'
+  postToolUseFailure:
+    - type: command
+      command: '"${COPILOT_HOME:-$HOME/.copilot}/bin/copilot-agent-reminders" --agent Orchestrator --event postToolUseFailure'
+  preCompact:
+    - type: command
+      command: '"${COPILOT_HOME:-$HOME/.copilot}/bin/copilot-agent-reminders" --agent Orchestrator --event preCompact'
 ---
 
 You are a principal software engineer.
