@@ -16,7 +16,8 @@ use tempfile::TempDir;
 
 const AGENT: &str = "test-agent";
 const MESSAGE: &str = "Remember your prompt obligations.";
-const SHIPPED_MESSAGE: &str = "Remember your prompt, you should delegate grunt work for efficiency";
+const SHIPPED_MESSAGE: &str =
+    "Soft block: Remember your prompt, you MUST delegate grunt work for efficiency!";
 const SESSION: &str = "session-1";
 const STATE_FILE_NAME: &str = "agent-reminders-state.json";
 const LOCK_FILE_NAME: &str = "agent-reminders-state.lock";
@@ -54,15 +55,39 @@ impl TestEnvironment {
 
     /// Writes a one-rule configuration for [`AGENT`].
     fn write_rule(&self, message: &str, reset_tools: &[&str], condition: Value) {
-        self.write_rule_at(&self.config, message, reset_tools, condition);
+        self.write_rule_with_signal(message, reset_tools, &["*"], condition);
     }
 
-    fn write_rule_at(&self, path: &Path, message: &str, reset_tools: &[&str], condition: Value) {
+    fn write_rule_with_signal(
+        &self,
+        message: &str,
+        reset_tools: &[&str],
+        signal_on_tools: &[&str],
+        condition: Value,
+    ) {
+        self.write_rule_at(
+            &self.config,
+            message,
+            reset_tools,
+            signal_on_tools,
+            condition,
+        );
+    }
+
+    fn write_rule_at(
+        &self,
+        path: &Path,
+        message: &str,
+        reset_tools: &[&str],
+        signal_on_tools: &[&str],
+        condition: Value,
+    ) {
         self.write_config_at(
             path,
             json!({ (AGENT): [{
             "message": message,
             "resetTools": reset_tools,
+            "signalOnTools": signal_on_tools,
             "condition": condition,
         }] }),
         );
@@ -178,7 +203,9 @@ impl TestEnvironment {
             // still fail when the child stops at the bounded-read limit.
             let _ = pipe.write_all(stdin);
         }
-        child.wait_with_output().expect("wait for copilot-agent-reminders")
+        child
+            .wait_with_output()
+            .expect("wait for copilot-agent-reminders")
     }
 
     /// Runs the executable and requires the child to consume the whole payload.
@@ -199,7 +226,9 @@ impl TestEnvironment {
         pipe.write_all(stdin)
             .expect("copilot-agent-reminders must consume stdin before exiting");
         drop(pipe);
-        child.wait_with_output().expect("wait for copilot-agent-reminders")
+        child
+            .wait_with_output()
+            .expect("wait for copilot-agent-reminders")
     }
 
     fn spawn_event(&self, event: &str, payload: &[u8]) -> (Child, Vec<u8>) {
@@ -217,17 +246,6 @@ impl TestEnvironment {
 
     fn pre(&self, session: &str, tool: &str, timestamp: WireTimestampMillis) -> Output {
         self.run_event("preToolUse", &payload(session, timestamp, Some(tool)))
-    }
-
-    fn post(&self, session: &str, tool: &str, timestamp: WireTimestampMillis) -> Output {
-        self.run_event("postToolUse", &payload(session, timestamp, Some(tool)))
-    }
-
-    fn failure(&self, session: &str, tool: &str, timestamp: WireTimestampMillis) -> Output {
-        self.run_event(
-            "postToolUseFailure",
-            &payload(session, timestamp, Some(tool)),
-        )
     }
 
     fn compact(&self, session: &str, timestamp: WireTimestampMillis) -> Output {
@@ -312,129 +330,122 @@ fn assert_continue(output: &Output) {
     assert_eq!(stdout_text(output), "{}\n");
 }
 
-fn assert_single_delivery_log(output: &Output, event: &str, message: &str) {
+fn assert_single_delivery_log(output: &Output, message_count: usize) {
     let stderr = stderr_text(output);
     assert_eq!(
         stderr.lines().count(),
         1,
-        "emitted output must add exactly one stderr record: {stderr}"
+        "a denial must add exactly one stderr record: {stderr}"
     );
     assert!(
-        stderr.starts_with("copilot-agent-reminders: info: emitted "),
-        "delivery must be logged as transport emission: {stderr}"
+        stderr.starts_with("copilot-agent-reminders: info: denied "),
+        "delivery must be logged as a denial: {stderr}"
     );
-    for field in ["sessionId=", "agent=", "timestamp=", "messages="] {
+    for field in ["sessionId=", "agent=", "timestamp="] {
         assert!(
             stderr.contains(field),
             "delivery record must include {field}: {stderr}"
         );
     }
     assert!(
-        stderr.contains(&format!("event={event} ")),
-        "delivery record must include event={event}: {stderr}"
+        stderr.contains("event=preToolUse"),
+        "delivery record must include event=preToolUse: {stderr}"
     );
     assert!(
-        !stderr.contains(message),
-        "delivery record must not include reminder text: {stderr}"
+        stderr.contains(&format!("messages={message_count}")),
+        "delivery record must include the message count: {stderr}"
     );
 }
 
-fn assert_success_reminder(output: &Output, message: &str) {
+/// Asserts that `output` is a soft deny carrying exactly `message` as its
+/// reason, with exit code 0 and a transport-only delivery log line.
+fn assert_denies(output: &Output, message: &str) {
     assert_eq!(
         output.status.code(),
         Some(0),
-        "expected success; stderr: {}",
+        "a preToolUse denial must still exit 0; stderr: {}",
         stderr_text(output)
     );
     let text = stdout_text(output);
     let value: Value = serde_json::from_str(text.trim()).expect("stdout is hook JSON");
     let object = value.as_object().expect("hook output is a JSON object");
-    assert_eq!(object.len(), 1, "hook output has exactly one field");
+    assert_eq!(object.len(), 2, "deny output has exactly two fields");
     assert_eq!(
-        object.get("additionalContext").and_then(Value::as_str),
+        object.get("permissionDecision").and_then(Value::as_str),
+        Some("deny")
+    );
+    assert_eq!(
+        object
+            .get("permissionDecisionReason")
+            .and_then(Value::as_str),
         Some(message)
     );
-    assert_single_delivery_log(output, "postToolUse", message);
-}
-
-fn assert_failure_reminder(output: &Output, message: &str) {
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "expected recovery exit code; stderr: {}",
+    assert_single_delivery_log(output, 1);
+    assert!(
+        !stderr_text(output).contains(message),
+        "delivery record must not include reminder text: {}",
         stderr_text(output)
     );
-    assert_eq!(stdout_text(output), format!("{message}\n"));
-    assert_single_delivery_log(output, "postToolUseFailure", message);
 }
 
 fn tool_calls(count: u64, tools: &[&str]) -> Value {
-    json!({"type": "toolCalls", "count": count, "tools": tools})
+    json!({
+        "type": "toolCalls",
+        "count": count,
+        "tools": tools,
+    })
+}
+
+fn elapsed_time(seconds: f64) -> Value {
+    json!({"type": "elapsedTime", "seconds": seconds})
+}
+
+fn pre_compact_event() -> Value {
+    json!({"type": "event", "event": "preCompact"})
 }
 
 #[test]
-fn shell_pairs_emit_at_each_five_invocation_boundary() {
+fn the_fifth_call_denies_and_retrying_the_same_tool_immediately_succeeds() {
     let environment = TestEnvironment::new();
     environment.write_rule(MESSAGE, &[], tool_calls(5, &["bash"]));
 
-    for index in 0..10 {
+    for index in 0..4 {
         let timestamp = BASE_TIME + index * 1000;
         assert_continue(&environment.pre(SESSION, "bash", timestamp));
-
-        let result = environment.post(SESSION, "bash", timestamp + 1);
-        if index == 4 || index == 9 {
-            assert_success_reminder(&result, MESSAGE);
-        } else {
-            assert_continue(&result);
-        }
     }
+
+    let fifth = BASE_TIME + 4000;
+    assert_denies(&environment.pre(SESSION, "bash", fifth), MESSAGE);
+
+    // The denial fully reset the interval, so an immediate retry succeeds.
+    assert_continue(&environment.pre(SESSION, "bash", fifth + 1));
+
+    for index in 1..4 {
+        let timestamp = fifth + 1 + index * 1000;
+        assert_continue(&environment.pre(SESSION, "bash", timestamp));
+    }
+    let tenth = fifth + 1 + 4000;
+    assert_denies(&environment.pre(SESSION, "bash", tenth), MESSAGE);
 }
 
 #[test]
-fn reset_tool_resets_an_interval_without_waiting_for_completion() {
+fn reset_tool_resets_an_interval_without_being_denied() {
     let environment = TestEnvironment::new();
     environment.write_rule(MESSAGE, &["task"], tool_calls(5, &["bash"]));
 
     for index in 0..4 {
         let timestamp = BASE_TIME + index * 1000;
         assert_continue(&environment.pre(SESSION, "bash", timestamp));
-        assert_continue(&environment.post(SESSION, "bash", timestamp + 1));
     }
 
     assert_continue(&environment.pre(SESSION, "task", BASE_TIME + 10_000));
 
-    for index in 0..5 {
+    for index in 0..4 {
         let timestamp = BASE_TIME + 20_000 + index * 1000;
         assert_continue(&environment.pre(SESSION, "bash", timestamp));
-        let result = environment.post(SESSION, "bash", timestamp + 1);
-        if index == 4 {
-            assert_success_reminder(&result, MESSAGE);
-        } else {
-            assert_continue(&result);
-        }
     }
-}
-
-#[test]
-fn failed_tools_count_and_failure_reminders_use_exit_two() {
-    let environment = TestEnvironment::new();
-    environment.write_rule(MESSAGE, &[], tool_calls(2, &["bash"]));
-
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME));
-    assert_continue(&environment.failure(SESSION, "bash", BASE_TIME + 1));
-
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 1000));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 1001),
-        MESSAGE,
-    );
-
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 2000));
-    assert_continue(&environment.failure(SESSION, "bash", BASE_TIME + 2001));
-
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 3000));
-    assert_failure_reminder(
-        &environment.failure(SESSION, "bash", BASE_TIME + 3001),
+    assert_denies(
+        &environment.pre(SESSION, "bash", BASE_TIME + 24_000),
         MESSAGE,
     );
 }
@@ -443,35 +454,31 @@ fn failed_tools_count_and_failure_reminders_use_exit_two() {
 fn emitted_reminder_logs_transport_metadata_without_payload_text() {
     let environment = TestEnvironment::new();
     environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME));
 
     let tool_args_marker = "tool-args-marker-64b2";
-    let tool_result_marker = "tool-result-marker-64b2";
     let prompt_marker = "prompt-marker-64b2";
     let input = json!({
         "sessionId": SESSION,
-        "timestamp": BASE_TIME + 1,
+        "timestamp": BASE_TIME,
         "toolName": "bash",
         "toolArgs": {"command": tool_args_marker},
-        "toolResult": tool_result_marker,
         "prompt": prompt_marker,
     });
     let output = environment.run_event(
-        "postToolUse",
+        "preToolUse",
         &serde_json::to_vec(&input).expect("serialize payload"),
     );
 
-    assert_success_reminder(&output, MESSAGE);
+    assert_denies(&output, MESSAGE);
     let stderr = stderr_text(&output);
     assert_eq!(
         stderr,
         format!(
-            "copilot-agent-reminders: info: emitted sessionId=\"{SESSION}\" agent=\"{AGENT}\" \
-             timestamp={} event=postToolUse messages=1\n",
-            BASE_TIME + 1
+            "copilot-agent-reminders: info: denied sessionId=\"{SESSION}\" agent=\"{AGENT}\" \
+             timestamp={BASE_TIME} event=preToolUse messages=1\n"
         )
     );
-    for marker in [tool_args_marker, tool_result_marker, prompt_marker] {
+    for marker in [tool_args_marker, prompt_marker] {
         assert!(
             !stderr.contains(marker),
             "delivery log must omit payload data: {stderr}"
@@ -480,42 +487,15 @@ fn emitted_reminder_logs_transport_metadata_without_payload_text() {
 }
 
 #[test]
-fn failed_tool_recovery_logs_delivery_metadata() {
+fn pre_compact_latches_and_denies_the_next_tool_call() {
     let environment = TestEnvironment::new();
-    environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
-
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME));
-    let output = environment.failure(SESSION, "bash", BASE_TIME + 1);
-    assert_failure_reminder(&output, MESSAGE);
-
-    let stderr = stderr_text(&output);
-    assert_eq!(
-        stderr,
-        format!(
-            "copilot-agent-reminders: info: emitted sessionId=\"{SESSION}\" agent=\"{AGENT}\" \
-             timestamp={} event=postToolUseFailure messages=1\n",
-            BASE_TIME + 1
-        )
-    );
-}
-
-#[test]
-fn pre_compact_latches_without_emitting_until_the_next_tool_result() {
-    let environment = TestEnvironment::new();
-    environment.write_rule(
-        MESSAGE,
-        &[],
-        json!({"type": "event", "event": "preCompact"}),
-    );
+    environment.write_rule(MESSAGE, &[], pre_compact_event());
 
     assert_continue(&environment.compact(SESSION, BASE_TIME));
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 1000));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 1001),
-        MESSAGE,
-    );
+    assert_denies(&environment.pre(SESSION, "bash", BASE_TIME + 1000), MESSAGE);
 
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME + 2000));
+    // The denial reset the latch, so the next call is unaffected.
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 2000));
 }
 
 #[test]
@@ -524,20 +504,14 @@ fn sessions_have_independent_intervals() {
     environment.write_rule(MESSAGE, &[], tool_calls(2, &["bash"]));
 
     assert_continue(&environment.pre("session-a", "bash", BASE_TIME));
-    assert_continue(&environment.post("session-a", "bash", BASE_TIME + 1));
-
     assert_continue(&environment.pre("session-b", "bash", BASE_TIME + 1000));
-    assert_continue(&environment.post("session-b", "bash", BASE_TIME + 1001));
 
-    assert_continue(&environment.pre("session-a", "bash", BASE_TIME + 2000));
-    assert_success_reminder(
-        &environment.post("session-a", "bash", BASE_TIME + 2001),
+    assert_denies(
+        &environment.pre("session-a", "bash", BASE_TIME + 2000),
         MESSAGE,
     );
-
-    assert_continue(&environment.pre("session-b", "bash", BASE_TIME + 3000));
-    assert_success_reminder(
-        &environment.post("session-b", "bash", BASE_TIME + 3001),
+    assert_denies(
+        &environment.pre("session-b", "bash", BASE_TIME + 3000),
         MESSAGE,
     );
 }
@@ -550,22 +524,20 @@ fn session_start_preserves_persisted_state_on_resume() {
     for index in 0..4 {
         let timestamp = BASE_TIME + index * 1000;
         assert_continue(&environment.pre(SESSION, "bash", timestamp));
-        assert_continue(&environment.post(SESSION, "bash", timestamp + 1));
     }
 
     assert_continue(&environment.session_start(SESSION, BASE_TIME + 10_000));
     assert_continue(&environment.session_start("fresh-session", BASE_TIME + 10_000));
     assert!(environment.state_file("fresh-session").is_file());
 
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 11_000));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 11_001),
+    assert_denies(
+        &environment.pre(SESSION, "bash", BASE_TIME + 11_000),
         MESSAGE,
     );
 }
 
 #[test]
-fn elapsed_time_composites_require_every_child_condition() {
+fn all_composites_require_every_child_condition() {
     let environment = TestEnvironment::new();
     environment.write_rule(
         MESSAGE,
@@ -574,62 +546,44 @@ fn elapsed_time_composites_require_every_child_condition() {
             "type": "all",
             "conditions": [
                 tool_calls(2, &["bash"]),
-                {"type": "elapsedTime", "seconds": 1},
+                elapsed_time(1.0),
             ],
         }),
     );
 
     assert_continue(&environment.pre(SESSION, "bash", BASE_TIME));
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME + 100));
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 100));
 
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 2000));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 2001),
-        MESSAGE,
-    );
+    assert_denies(&environment.pre(SESSION, "bash", BASE_TIME + 2000), MESSAGE);
 }
 
 #[test]
-fn configured_elapsed_time_rule_emits_at_its_threshold_and_repeats() {
+fn configured_elapsed_time_rule_denies_at_its_threshold_and_repeats() {
     let environment = TestEnvironment::new();
-    environment.write_rule(MESSAGE, &[], json!({"type": "elapsedTime", "seconds": 1}));
+    environment.write_rule(MESSAGE, &[], elapsed_time(1.0));
 
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME));
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME + 999));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 1000),
-        MESSAGE,
-    );
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME));
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 999));
+    assert_denies(&environment.pre(SESSION, "bash", BASE_TIME + 1000), MESSAGE);
 
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME + 1999));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 2000),
-        MESSAGE,
-    );
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 1999));
+    assert_denies(&environment.pre(SESSION, "bash", BASE_TIME + 2000), MESSAGE);
 }
 
 #[test]
 fn session_start_with_changed_policy_resets_the_elapsed_baseline() {
     let environment = TestEnvironment::new();
-    environment.write_rule(
-        "Old policy.",
-        &[],
-        json!({"type": "elapsedTime", "seconds": 60}),
-    );
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME));
+    environment.write_rule("Old policy.", &[], elapsed_time(60.0));
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME));
 
     let changed_message = "Changed policy.";
-    environment.write_rule(
-        changed_message,
-        &[],
-        json!({"type": "elapsedTime", "seconds": 1}),
-    );
+    environment.write_rule(changed_message, &[], elapsed_time(1.0));
 
     assert_continue(&environment.session_start(SESSION, BASE_TIME + 10_000));
 
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME + 10_999));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 11_000),
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 10_999));
+    assert_denies(
+        &environment.pre(SESSION, "bash", BASE_TIME + 11_000),
         changed_message,
     );
 }
@@ -637,8 +591,8 @@ fn session_start_with_changed_policy_resets_the_elapsed_baseline() {
 #[test]
 fn session_start_with_unchanged_policy_preserves_the_elapsed_baseline() {
     let environment = TestEnvironment::new();
-    environment.write_rule(MESSAGE, &[], json!({"type": "elapsedTime", "seconds": 2}));
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME));
+    environment.write_rule(MESSAGE, &[], elapsed_time(2.0));
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME));
 
     let resumed = environment.session_start(SESSION, BASE_TIME + 1500);
     assert_continue(&resumed);
@@ -648,11 +602,8 @@ fn session_start_with_unchanged_policy_preserves_the_elapsed_baseline() {
         stderr_text(&resumed)
     );
 
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME + 1999));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 2000),
-        MESSAGE,
-    );
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 1999));
+    assert_denies(&environment.pre(SESSION, "bash", BASE_TIME + 2000), MESSAGE);
 }
 
 #[test]
@@ -674,31 +625,22 @@ fn corrupt_state_is_reported_once_and_replaced() {
     );
     assert!(stderr_text(&first_pre).contains("state"));
 
-    let first_post = environment.post(SESSION, "bash", BASE_TIME + 1);
-    assert_continue(&first_post);
-    assert!(!stderr_text(&first_post).contains("warning"));
-
     let recovered = fs::read_to_string(&state_file).expect("read recovered state");
     serde_json::from_str::<Value>(&recovered).expect("recovered state is valid JSON");
 
-    for index in 1..5 {
+    for index in 1..4 {
         let timestamp = BASE_TIME + index * 1000;
         assert_continue(&environment.pre(SESSION, "bash", timestamp));
-        let result = environment.post(SESSION, "bash", timestamp + 1);
-        if index == 4 {
-            assert_success_reminder(&result, MESSAGE);
-        } else {
-            assert_continue(&result);
-        }
     }
+    assert_denies(&environment.pre(SESSION, "bash", BASE_TIME + 4000), MESSAGE);
 }
 
 #[test]
 fn session_start_repairs_unsupported_schema_state_with_one_warning() {
     let environment = TestEnvironment::new();
-    environment.write_rule(MESSAGE, &[], json!({"type": "elapsedTime", "seconds": 2}));
+    environment.write_rule(MESSAGE, &[], elapsed_time(2.0));
 
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME));
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME));
 
     let state_file = environment.state_file(SESSION);
     let mut state: Value =
@@ -720,13 +662,8 @@ fn session_start_repairs_unsupported_schema_state_with_one_warning() {
     );
     assert!(stderr_text(&repaired).contains("state"));
 
-    let first_post = environment.post(SESSION, "bash", BASE_TIME + 6999);
-    assert_continue(&first_post);
-    assert!(!stderr_text(&first_post).contains("warning"));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 7000),
-        MESSAGE,
-    );
+    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 6999));
+    assert_denies(&environment.pre(SESSION, "bash", BASE_TIME + 7000), MESSAGE);
 }
 
 #[test]
@@ -737,18 +674,14 @@ fn configuration_changes_start_fresh_intervals() {
     for index in 0..4 {
         let timestamp = BASE_TIME + index * 1000;
         assert_continue(&environment.pre(SESSION, "bash", timestamp));
-        assert_continue(&environment.post(SESSION, "bash", timestamp + 1));
     }
 
     let changed_message = "The policy changed.";
     environment.write_rule(changed_message, &[], tool_calls(2, &["bash"]));
 
     assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 5000));
-    assert_continue(&environment.post(SESSION, "bash", BASE_TIME + 5001));
-
-    assert_continue(&environment.pre(SESSION, "bash", BASE_TIME + 6000));
-    assert_success_reminder(
-        &environment.post(SESSION, "bash", BASE_TIME + 6001),
+    assert_denies(
+        &environment.pre(SESSION, "bash", BASE_TIME + 6000),
         changed_message,
     );
 }
@@ -771,27 +704,9 @@ fn concurrent_processes_share_state_without_losing_updates() {
             .expect("write concurrent preToolUse payload");
     }
 
+    let mut denials = 0;
     for (child, _) in children {
         let output = child.wait_with_output().expect("wait for preToolUse");
-        assert_continue(&output);
-    }
-
-    let mut children = Vec::new();
-    for index in 0..4 {
-        let timestamp = BASE_TIME + 5000 + index * 1000;
-        children.push(
-            environment.spawn_event("postToolUse", &payload(SESSION, timestamp, Some("bash"))),
-        );
-    }
-    for (child, stdin) in &mut children {
-        let mut pipe = child.stdin.take().expect("child stdin");
-        pipe.write_all(stdin)
-            .expect("write concurrent postToolUse payload");
-    }
-
-    let mut reminders = 0;
-    for (child, _) in children {
-        let output = child.wait_with_output().expect("wait for postToolUse");
         assert_eq!(
             output.status.code(),
             Some(0),
@@ -804,24 +719,30 @@ fn concurrent_processes_share_state_without_losing_updates() {
         }
         let value: Value = serde_json::from_str(text.trim()).expect("stdout is hook JSON");
         assert_eq!(
-            value.get("additionalContext").and_then(Value::as_str),
+            value.get("permissionDecision").and_then(Value::as_str),
+            Some("deny")
+        );
+        assert_eq!(
+            value
+                .get("permissionDecisionReason")
+                .and_then(Value::as_str),
             Some(MESSAGE)
         );
-        reminders += 1;
+        denials += 1;
     }
-    assert_eq!(reminders, 1, "exactly one concurrent transition emits");
+    assert_eq!(denials, 1, "exactly one concurrent transition denies");
 }
 
 #[test]
 fn missing_and_invalid_configuration_fail_open() {
     let environment = TestEnvironment::new();
 
-    let missing = environment.post(SESSION, "bash", BASE_TIME);
+    let missing = environment.pre(SESSION, "bash", BASE_TIME);
     assert_continue(&missing);
     assert!(!stderr_text(&missing).is_empty());
 
     fs::write(&environment.config, b"{ agents: [ }").expect("write invalid configuration");
-    let invalid = environment.post(SESSION, "bash", BASE_TIME + 1000);
+    let invalid = environment.pre(SESSION, "bash", BASE_TIME + 1000);
     assert_continue(&invalid);
     assert!(stderr_text(&invalid).contains("configuration"));
 }
@@ -833,7 +754,12 @@ fn multiline_configuration_failures_report_one_line() {
         "agents": {
             "multi\nline": [{
                 "message": "x",
-                "condition": {"type": "elapsedTime", "seconds": 0},
+                "resetTools": [],
+                "signalOnTools": ["*"],
+                "condition": {
+                    "type": "elapsedTime",
+                    "seconds": 0,
+                },
             }],
         },
     });
@@ -843,7 +769,7 @@ fn multiline_configuration_failures_report_one_line() {
     )
     .expect("write invalid configuration");
 
-    let output = environment.post(SESSION, "bash", BASE_TIME);
+    let output = environment.pre(SESSION, "bash", BASE_TIME);
     assert_continue(&output);
 
     let stderr = stderr_text(&output);
@@ -870,7 +796,7 @@ fn whole_configuration_without_agents_warns_once_and_invalidates_state() {
     assert!(environment.state_file(SESSION).is_file());
 
     environment.write_config_at(&environment.config, json!({}));
-    let output = environment.post(SESSION, "bash", BASE_TIME + 1000);
+    let output = environment.pre(SESSION, "bash", BASE_TIME + 1000);
     assert_continue(&output);
 
     let stderr = stderr_text(&output);
@@ -896,7 +822,7 @@ fn whole_configuration_without_agents_warns_once_and_invalidates_state() {
         "clearing must retain the stable lock file"
     );
 
-    let fresh = environment.post("fresh-session", "bash", BASE_TIME + 2000);
+    let fresh = environment.pre("fresh-session", "bash", BASE_TIME + 2000);
     assert_continue(&fresh);
     assert_eq!(
         stderr_text(&fresh).lines().count(),
@@ -915,7 +841,7 @@ fn invalid_input_fails_open_for_every_supported_event() {
     let environment = TestEnvironment::new();
     environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
 
-    let invalid_json = environment.run_event("postToolUse", b"{ not json");
+    let invalid_json = environment.run_event("preToolUse", b"{ not json");
     assert_continue(&invalid_json);
     assert!(!stderr_text(&invalid_json).is_empty());
 
@@ -923,7 +849,7 @@ fn invalid_input_fails_open_for_every_supported_event() {
     assert_continue(&environment.run_event("preToolUse", missing_session.as_bytes()));
 
     let wrong_timestamp = json!({"sessionId": SESSION, "timestamp": "later"}).to_string();
-    assert_continue(&environment.run_event("postToolUse", wrong_timestamp.as_bytes()));
+    assert_continue(&environment.run_event("preToolUse", wrong_timestamp.as_bytes()));
 
     let missing_tool = payload(SESSION, BASE_TIME, None);
     let pre_without_tool = environment.run_event("preToolUse", &missing_tool);
@@ -953,7 +879,7 @@ fn unconfigured_agent_on_a_new_session_creates_no_state() {
     environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
 
     let output = environment.run_args(
-        &environment.event_args_for_agent("unconfigured-agent", "postToolUse"),
+        &environment.event_args_for_agent("unconfigured-agent", "preToolUse"),
         &payload(SESSION, BASE_TIME, Some("bash")),
         &[],
     );
@@ -974,7 +900,6 @@ fn switching_to_an_unconfigured_agent_clears_stale_state_and_keeps_the_lock() {
     for index in 0..4 {
         let timestamp = BASE_TIME + index * 1000;
         assert_continue(&environment.pre(SESSION, "bash", timestamp));
-        assert_continue(&environment.post(SESSION, "bash", timestamp + 1));
     }
     assert!(environment.state_file(SESSION).is_file());
     assert!(environment.lock_file(SESSION).is_file());
@@ -1010,24 +935,20 @@ fn switching_to_an_unconfigured_agent_clears_stale_state_and_keeps_the_lock() {
         json!(1),
         "the configured agent must restart at the first invocation"
     );
-    assert_continue(&environment.post(SESSION, "bash", restart + 1));
 
     for index in 1..4 {
         let timestamp = restart + index * 1000;
         assert_continue(&environment.pre(SESSION, "bash", timestamp));
-        assert_continue(&environment.post(SESSION, "bash", timestamp + 1));
     }
 
-    let timestamp = restart + 4000;
-    assert_continue(&environment.pre(SESSION, "bash", timestamp));
-    assert_success_reminder(&environment.post(SESSION, "bash", timestamp + 1), MESSAGE);
+    assert_denies(&environment.pre(SESSION, "bash", restart + 4000), MESSAGE);
 }
 
 #[test]
 fn invalid_arguments_fail_open() {
     let environment = TestEnvironment::new();
     environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
-    let standard = environment.event_args("postToolUse");
+    let standard = environment.event_args("preToolUse");
     let input = payload(SESSION, BASE_TIME, Some("bash"));
 
     let mut duplicate = standard.clone();
@@ -1069,13 +990,7 @@ fn pascal_case_registration_payloads_fail_open_without_writing_state() {
     environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
     let input = pascal_case_payload(SESSION, "bash");
 
-    for event in [
-        "preToolUse",
-        "postToolUse",
-        "postToolUseFailure",
-        "preCompact",
-        "sessionStart",
-    ] {
+    for event in ["preToolUse", "preCompact", "sessionStart"] {
         let output = environment.run_event(event, &input);
         assert_continue(&output);
 
@@ -1102,7 +1017,7 @@ fn oversized_input_fails_open() {
     environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
 
     let oversized = vec![b' '; 16 * 1024 * 1024 + 1];
-    let output = environment.run_event("postToolUse", &oversized);
+    let output = environment.run_event("preToolUse", &oversized);
     assert_continue(&output);
     assert!(stderr_text(&output).contains("16 MiB"));
 }
@@ -1114,7 +1029,7 @@ fn large_payload_is_consumed_before_configuration_or_argument_failures() {
 
     let missing_config = environment.directory.path().join("missing.jsonc");
     let missing_output = environment.run_args_expecting_stdin_read(
-        &environment.event_args_with_config(AGENT, "postToolUse", &missing_config),
+        &environment.event_args_with_config(AGENT, "preToolUse", &missing_config),
         &input,
     );
     assert_continue(&missing_output);
@@ -1128,7 +1043,7 @@ fn large_payload_is_consumed_before_configuration_or_argument_failures() {
         OsString::from("--agent"),
         OsString::from(AGENT),
         OsString::from("--event"),
-        OsString::from("postToolUse"),
+        OsString::from("preToolUse"),
         OsString::from("--bogus"),
     ];
     let argument_output = environment.run_args_expecting_stdin_read(&invalid_arguments, &input);
@@ -1185,7 +1100,11 @@ fn help_exits_without_waiting_for_stdin() {
 
     let mut exited = false;
     for _ in 0..100 {
-        if child.try_wait().expect("poll copilot-agent-reminders").is_some() {
+        if child
+            .try_wait()
+            .expect("poll copilot-agent-reminders")
+            .is_some()
+        {
             exited = true;
             break;
         }
@@ -1195,7 +1114,9 @@ fn help_exits_without_waiting_for_stdin() {
         child.kill().expect("kill blocked help process");
     }
 
-    let output = child.wait_with_output().expect("wait for copilot-agent-reminders");
+    let output = child
+        .wait_with_output()
+        .expect("wait for copilot-agent-reminders");
     assert!(exited, "help must not read stdin before exiting");
     assert_eq!(output.status.code(), Some(0));
     assert!(stdout_text(&output).contains("Usage:"));
@@ -1216,10 +1137,7 @@ fn help_documents_camel_case_registration_requirements() {
         .join(" ");
 
     assert!(
-        help.contains(
-            "MUST use camelCase event keys: preToolUse, postToolUse, \
-             postToolUseFailure, preCompact, sessionStart"
-        ),
+        help.contains("MUST use camelCase event keys: preToolUse, preCompact, sessionStart"),
         "help must document the camelCase registration keys: {help}"
     );
     assert!(
@@ -1237,6 +1155,14 @@ fn help_documents_camel_case_registration_requirements() {
         help.contains("registration key, not the --event spelling, determines the payload format"),
         "help must separate registration keys from the --event spelling: {help}"
     );
+    assert!(
+        help.contains("permissionDecision"),
+        "help must describe the deny response shape: {help}"
+    );
+    assert!(
+        !help.contains("additionalContext"),
+        "help must not mention the retired additionalContext output: {help}"
+    );
 }
 
 #[test]
@@ -1251,6 +1177,7 @@ fn default_paths_use_home_and_copilot_home() {
         &home_config,
         "Message from HOME.",
         &[],
+        &["*"],
         tool_calls(1, &["bash"]),
     );
 
@@ -1260,24 +1187,8 @@ fn default_paths_use_home_and_copilot_home() {
         OsString::from("--event"),
         OsString::from("preToolUse"),
     ];
-    assert_continue(&environment.run_args(
-        &home_args,
-        &payload(SESSION, BASE_TIME, Some("bash")),
-        &[],
-    ));
-
-    let home_post = vec![
-        OsString::from("--agent"),
-        OsString::from(AGENT),
-        OsString::from("--event"),
-        OsString::from("postToolUse"),
-    ];
-    assert_success_reminder(
-        &environment.run_args(
-            &home_post,
-            &payload(SESSION, BASE_TIME + 1, Some("bash")),
-            &[],
-        ),
+    assert_denies(
+        &environment.run_args(&home_args, &payload(SESSION, BASE_TIME, Some("bash")), &[]),
         "Message from HOME.",
     );
     assert!(
@@ -1295,6 +1206,7 @@ fn default_paths_use_home_and_copilot_home() {
         &copilot_config,
         "Message from COPILOT_HOME.",
         &[],
+        &["*"],
         tool_calls(1, &["bash"]),
     );
     let copilot_home_args = vec![
@@ -1304,22 +1216,10 @@ fn default_paths_use_home_and_copilot_home() {
         OsString::from("preToolUse"),
     ];
     let copilot_home_env = [("COPILOT_HOME", copilot_home.as_os_str())];
-    assert_continue(&environment.run_args(
-        &copilot_home_args,
-        &payload("session-2", BASE_TIME + 2, Some("bash")),
-        &copilot_home_env,
-    ));
-
-    let copilot_home_args = vec![
-        OsString::from("--agent"),
-        OsString::from(AGENT),
-        OsString::from("--event"),
-        OsString::from("postToolUse"),
-    ];
-    assert_success_reminder(
+    assert_denies(
         &environment.run_args(
             &copilot_home_args,
-            &payload("session-2", BASE_TIME + 3, Some("bash")),
+            &payload("session-2", BASE_TIME + 2, Some("bash")),
             &copilot_home_env,
         ),
         "Message from COPILOT_HOME.",
@@ -1337,6 +1237,7 @@ fn empty_copilot_home_falls_back_to_the_home_configuration() {
         &home_config,
         "Message from HOME.",
         &[],
+        &["*"],
         tool_calls(1, &["bash"]),
     );
 
@@ -1346,19 +1247,7 @@ fn empty_copilot_home_falls_back_to_the_home_configuration() {
         &payload(SESSION, BASE_TIME, Some("bash")),
         &empty_copilot_home,
     );
-    assert_continue(&pre);
-    assert!(
-        stderr_text(&pre).is_empty(),
-        "empty COPILOT_HOME must fall back silently: {}",
-        stderr_text(&pre)
-    );
-
-    let post = environment.run_args(
-        &environment.default_event_args("postToolUse"),
-        &payload(SESSION, BASE_TIME + 1, Some("bash")),
-        &empty_copilot_home,
-    );
-    assert_success_reminder(&post, "Message from HOME.");
+    assert_denies(&pre, "Message from HOME.");
     assert!(environment.home_state_file(SESSION).is_file());
 }
 
@@ -1375,7 +1264,7 @@ fn empty_or_missing_home_fails_open_without_writing_to_the_working_directory() {
     // Resolving it relative to the working directory would create `.agents`.
     let empty_home = environment.run_args_in(
         &working,
-        &environment.config_only_args("postToolUse"),
+        &environment.config_only_args("preToolUse"),
         &input,
         &[("HOME", OsStr::new(""))],
         &[],
@@ -1389,7 +1278,7 @@ fn empty_or_missing_home_fails_open_without_writing_to_the_working_directory() {
 
     let missing_home = environment.run_args_in(
         &working,
-        &environment.config_only_args("postToolUse"),
+        &environment.config_only_args("preToolUse"),
         &input,
         &[],
         &["HOME"],
@@ -1403,7 +1292,7 @@ fn empty_or_missing_home_fails_open_without_writing_to_the_working_directory() {
 
     let default_config = environment.run_args_in(
         &working,
-        &environment.default_event_args("postToolUse"),
+        &environment.default_event_args("preToolUse"),
         &input,
         &[("HOME", OsStr::new(""))],
         &[],
@@ -1433,21 +1322,7 @@ fn explicit_config_and_state_paths_work_without_home() {
         &[],
         &["HOME"],
     );
-    assert_continue(&pre);
-    assert!(
-        stderr_text(&pre).is_empty(),
-        "explicit paths must not require HOME: {}",
-        stderr_text(&pre)
-    );
-
-    let post = environment.run_args_in(
-        environment.directory.path(),
-        &environment.event_args("postToolUse"),
-        &payload(SESSION, BASE_TIME + 1, Some("bash")),
-        &[],
-        &["HOME"],
-    );
-    assert_success_reminder(&post, MESSAGE);
+    assert_denies(&pre, MESSAGE);
     assert!(environment.state_file(SESSION).is_file());
 }
 
@@ -1466,19 +1341,15 @@ fn non_utf8_copilot_home_paths_are_supported() {
         &copilot_config,
         "Message from a non-UTF-8 COPILOT_HOME.",
         &[],
+        &["*"],
         tool_calls(1, &["bash"]),
     );
 
     let non_utf8_home = [("COPILOT_HOME", copilot_home.as_os_str())];
-    assert_continue(&environment.run_args(
-        &environment.default_event_args("preToolUse"),
-        &payload(SESSION, BASE_TIME, Some("bash")),
-        &non_utf8_home,
-    ));
-    assert_success_reminder(
+    assert_denies(
         &environment.run_args(
-            &environment.default_event_args("postToolUse"),
-            &payload(SESSION, BASE_TIME + 1, Some("bash")),
+            &environment.default_event_args("preToolUse"),
+            &payload(SESSION, BASE_TIME, Some("bash")),
             &non_utf8_home,
         ),
         "Message from a non-UTF-8 COPILOT_HOME.",
@@ -1512,7 +1383,7 @@ fn shipped_configuration_drives_the_expected_hook_behavior() {
         stderr_text(&start)
     );
 
-    for index in 0..5 {
+    for index in 0..4 {
         let timestamp = BASE_TIME + 1000 + index * 2000;
         let pre = run("preToolUse", timestamp, Some("bash"));
         assert_continue(&pre);
@@ -1521,26 +1392,37 @@ fn shipped_configuration_drives_the_expected_hook_behavior() {
             "shipped configuration pre hook must not warn: {}",
             stderr_text(&pre)
         );
-
-        let post = run("postToolUse", timestamp + 1, Some("bash"));
-        if index == 4 {
-            assert_success_reminder(&post, SHIPPED_MESSAGE);
-        } else {
-            assert_continue(&post);
-        }
     }
+
+    let fifth = BASE_TIME + 1000 + 4 * 2000;
+    assert_denies(&run("preToolUse", fifth, Some("bash")), SHIPPED_MESSAGE);
+
+    // The denial reset the interval, so an immediate retry succeeds.
+    assert_continue(&run("preToolUse", fifth + 1, Some("bash")));
 
     let compact = run("preCompact", BASE_TIME + 20_000, None);
     assert_continue(&compact);
-    let after_compact = run("postToolUse", BASE_TIME + 20_001, Some("bash"));
-    assert_success_reminder(&after_compact, SHIPPED_MESSAGE);
+    assert_denies(
+        &run("preToolUse", BASE_TIME + 20_001, Some("bash")),
+        SHIPPED_MESSAGE,
+    );
 
     let compact = run("preCompact", BASE_TIME + 30_000, None);
     assert_continue(&compact);
+    // "task" is the configured reset tool; it clears the latch and is never
+    // itself denied, even though the preCompact latch was pending.
     let reset = run("preToolUse", BASE_TIME + 30_001, Some("task"));
     assert_continue(&reset);
-    let after_reset = run("postToolUse", BASE_TIME + 30_002, Some("bash"));
-    assert_continue(&after_reset);
+    assert_continue(&run("preToolUse", BASE_TIME + 30_002, Some("bash")));
+
+    // Rule-level signalOnTools narrows preCompact delivery to shell calls.
+    let compact = run("preCompact", BASE_TIME + 40_000, None);
+    assert_continue(&compact);
+    assert_continue(&run("preToolUse", BASE_TIME + 40_001, Some("view")));
+    assert_denies(
+        &run("preToolUse", BASE_TIME + 40_002, Some("bash")),
+        SHIPPED_MESSAGE,
+    );
 }
 
 #[test]
@@ -1550,7 +1432,9 @@ fn deeply_nested_configuration_is_rejected_without_state_or_stack_overflow() {
     let environment = TestEnvironment::new();
     let mut configuration = String::from("{\"agents\":{\"");
     configuration.push_str(AGENT);
-    configuration.push_str("\":[{\"message\":\"x\",\"condition\":");
+    configuration.push_str(
+        "\":[{\"message\":\"x\",\"resetTools\":[],\"signalOnTools\":[\"*\"],\"condition\":",
+    );
     for _ in 0..DEPTH {
         configuration.push_str("{\"type\":\"any\",\"conditions\":[");
     }
@@ -1574,4 +1458,196 @@ fn deeply_nested_configuration_is_rejected_without_state_or_stack_overflow() {
         !environment.state.exists(),
         "rejected configuration must not create state"
     );
+}
+
+#[test]
+fn validate_accepts_a_valid_configuration_and_touches_no_state() {
+    let environment = TestEnvironment::new();
+    environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
+
+    let output = environment.run_args(
+        &[
+            OsString::from("--validate"),
+            OsString::from("--config"),
+            environment.config.clone().into_os_string(),
+        ],
+        b"",
+        &[],
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = stdout_text(&output);
+    assert!(
+        stdout.contains("is valid"),
+        "expected a validity confirmation, got: {stdout}"
+    );
+    assert!(
+        stdout.contains(&environment.config.display().to_string()),
+        "expected the resolved path in the confirmation, got: {stdout}"
+    );
+    assert!(stderr_text(&output).is_empty());
+    assert!(
+        !environment.state.exists(),
+        "--validate must not create a state directory"
+    );
+}
+
+#[test]
+fn validate_rejects_a_configuration_missing_a_required_field() {
+    let environment = TestEnvironment::new();
+    environment.write_config_at(
+        &environment.config,
+        json!({ (AGENT): [{
+            "message": MESSAGE,
+            "resetTools": [],
+            "condition": tool_calls(1, &["bash"]),
+        }] }),
+    );
+
+    let output = environment.run_args(
+        &[
+            OsString::from("--validate"),
+            OsString::from("--config"),
+            environment.config.clone().into_os_string(),
+        ],
+        b"",
+        &[],
+    );
+
+    assert_ne!(output.status.code(), Some(0));
+    assert!(
+        stderr_text(&output).contains("missing field `signalOnTools`"),
+        "expected the missing-field diagnostic, got: {}",
+        stderr_text(&output)
+    );
+    assert!(!stdout_text(&output).contains("is valid"));
+}
+
+#[test]
+fn validate_rejects_a_nonexistent_configuration_path() {
+    let environment = TestEnvironment::new();
+    let missing = environment.directory.path().join("missing.jsonc");
+
+    let output = environment.run_args(
+        &[
+            OsString::from("--validate"),
+            OsString::from("--config"),
+            missing.clone().into_os_string(),
+        ],
+        b"",
+        &[],
+    );
+
+    assert_ne!(output.status.code(), Some(0));
+    let stderr = stderr_text(&output);
+    assert!(
+        stderr.contains(&missing.display().to_string()),
+        "expected the missing path in the diagnostic, got: {stderr}"
+    );
+}
+
+#[test]
+fn validate_warns_but_succeeds_on_an_empty_configuration() {
+    let environment = TestEnvironment::new();
+    environment.write_config_at(&environment.config, json!({}));
+
+    let output = environment.run_args(
+        &[
+            OsString::from("--validate"),
+            OsString::from("--config"),
+            environment.config.clone().into_os_string(),
+        ],
+        b"",
+        &[],
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stderr = stderr_text(&output);
+    assert!(
+        stderr.contains("all reminders are disabled"),
+        "expected the empty-configuration warning, got: {stderr}"
+    );
+    assert!(!stdout_text(&output).contains("is valid"));
+}
+
+#[test]
+fn validate_rejects_combination_with_agent_event_or_state_dir() {
+    let environment = TestEnvironment::new();
+    environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
+
+    let with_agent = environment.run_args(
+        &[
+            OsString::from("--validate"),
+            OsString::from("--config"),
+            environment.config.clone().into_os_string(),
+            OsString::from("--agent"),
+            OsString::from(AGENT),
+        ],
+        b"",
+        &[],
+    );
+    assert_ne!(with_agent.status.code(), Some(0));
+    assert!(!stdout_text(&with_agent).contains("is valid"));
+
+    let with_event = environment.run_args(
+        &[
+            OsString::from("--validate"),
+            OsString::from("--config"),
+            environment.config.clone().into_os_string(),
+            OsString::from("--event"),
+            OsString::from("preToolUse"),
+        ],
+        b"",
+        &[],
+    );
+    assert_ne!(with_event.status.code(), Some(0));
+
+    let with_state_dir = environment.run_args(
+        &[
+            OsString::from("--validate"),
+            OsString::from("--config"),
+            environment.config.clone().into_os_string(),
+            OsString::from("--state-dir"),
+            environment.state.clone().into_os_string(),
+        ],
+        b"",
+        &[],
+    );
+    assert_ne!(with_state_dir.status.code(), Some(0));
+}
+
+#[test]
+fn validate_succeeds_with_stdin_closed() {
+    let environment = TestEnvironment::new();
+    environment.write_rule(MESSAGE, &[], tool_calls(1, &["bash"]));
+
+    let mut command = environment.command();
+    command
+        .current_dir(environment.directory.path())
+        .args([
+            OsString::from("--validate"),
+            OsString::from("--config"),
+            environment.config.clone().into_os_string(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let child = command.spawn().expect("spawn copilot-agent-reminders");
+    let output = child
+        .wait_with_output()
+        .expect("wait for copilot-agent-reminders");
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout_text(&output).contains("is valid"));
+}
+
+#[test]
+fn invalid_configuration_on_pre_tool_use_still_fails_open() {
+    let environment = TestEnvironment::new();
+    fs::write(&environment.config, b"{ agents: [ }").expect("write invalid configuration");
+
+    let output = environment.pre(SESSION, "bash", BASE_TIME);
+    assert_continue(&output);
+    assert!(stderr_text(&output).contains("configuration"));
 }

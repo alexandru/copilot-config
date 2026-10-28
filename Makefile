@@ -154,6 +154,7 @@ build-utils: install-rustup
 	mkdir -p bin
 	install -m 0755 "$(CARGO_TARGET_DIR)/release/copilot-agent-reminders" bin/copilot-agent-reminders
 	install -m 0755 "$(CARGO_TARGET_DIR)/release/copilot-switch" bin/copilot-switch
+	./bin/copilot-agent-reminders --validate --config agent-reminders.jsonc
 
 test-utils: install-rustup
 	cargo test $(UTILS_CARGO_FLAGS) --locked --workspace

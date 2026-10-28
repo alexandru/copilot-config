@@ -4,16 +4,30 @@
 //! it [`Event`] values carrying observed timestamps and persist the returned
 //! [`SessionState`] between processes.
 //!
-//! Each configured rule owns an independent interval. A tool pre-hook resets an
-//! interval when the tool matches that rule's reset patterns, or counts the
-//! invocation once when it matches a `toolCalls` condition. Counting happens
-//! before the tool runs, so failed calls count too. The post-tool event
-//! evaluates every interval and emits matched messages in configuration order;
-//! an emitted rule resets its own interval.
+//! Each configured rule owns an independent interval, evaluated entirely on the
+//! `preToolUse` event (a soft deny placed before the tool call, not a
+//! post-hoc notice). For each rule, in order: a tool matching that rule's
+//! reset patterns resets the interval and is never denied; otherwise a tool
+//! matching the rule's `toolCalls` condition increments that interval's
+//! counter; the condition is then re-checked against the updated counter.
+//! Checking the condition right after incrementing means the Nth call that
+//! reaches a `count: N` threshold is itself a denial candidate, not the
+//! (N+1)th.
 //!
-//! `preCompact` is latched per interval and never emits directly. The next
-//! post-tool event evaluates the latch, including inside `all`/`any`
-//! compositions. Reset tools and emitted reminders both clear the latch.
+//! A satisfied condition can deny only when the current tool matches the
+//! rule-level `signalOnTools`, pushing the rule's message and resetting the
+//! interval. A satisfied condition whose signal set does not match the
+//! current tool neither denies nor resets: the rule stays armed and fires on
+//! its next matching tool. Messages from every denying rule are joined in
+//! configuration order and delivered as a single deny; a denial fully resets
+//! every rule that fired, so an immediate retry of the same tool call may
+//! proceed.
+//!
+//! `preCompact` is latched per interval and never denies directly. The next
+//! `preToolUse` event evaluates the latch, including inside `all`/`any`
+//! compositions, and can deny a tool that no condition counts depending on
+//! the rule-level `signalOnTools`. Reset tools and denying reminders both
+//! clear the latch.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -100,7 +114,29 @@ impl<'policy> BoundSession<'policy> {
         self.state
     }
 
-    fn apply_tool_before(&mut self, tool: &str, now: TimestampMillis) {
+    /// Counts and evaluates every rule against one `preToolUse` observation.
+    ///
+    /// For each rule, in order: a tool matching its reset patterns resets the
+    /// interval and is never denied, skipping both counting and evaluation for
+    /// that rule. Otherwise, a tool matching a `toolCalls` condition is
+    /// counted first, and the (possibly just-incremented) condition is
+    /// evaluated second; a rule whose condition counts no tool at all (a bare
+    /// `elapsedTime` or `preCompact` rule) is still evaluated on every call,
+    /// since nothing here gates evaluation on whether this tool was counted.
+    /// This ordering is what makes the Nth call that reaches a `count: N`
+    /// threshold the one that is denied, not the (N+1)th.
+    ///
+    /// A satisfied condition only denies the current tool when it matches the
+    /// rule-level `signalOnTools`; a satisfied-but-not-matching tool neither
+    /// denies nor resets, so the rule stays armed for its next matching tool.
+    ///
+    /// `validate_no_count_reset_overlap` (see `config.rs`) guarantees at parse
+    /// time that no tool pattern is both counted and resetting within one
+    /// rule, so the reset-before-count branch below can never race with the
+    /// counting branch for the same incoming tool.
+    fn apply_pre_tool(&mut self, tool: &str, now: TimestampMillis) -> Vec<String> {
+        let mut messages = Vec::new();
+
         for (entry, interval) in self
             .policy
             .entries()
@@ -113,23 +149,20 @@ impl<'policy> BoundSession<'policy> {
                 .any(|pattern| pattern.matches(tool))
             {
                 interval.reset(now);
-            } else if condition_counts_tool(entry.condition(), tool) {
+                continue;
+            }
+
+            if condition_counts_tool(entry.condition(), tool) {
                 let count = interval.counts.entry(tool.to_owned()).or_insert(0);
                 *count = count.saturating_add(1);
             }
-        }
-    }
 
-    fn evaluate(&mut self, now: TimestampMillis) -> Vec<String> {
-        let mut messages = Vec::new();
-
-        for (entry, interval) in self
-            .policy
-            .entries()
-            .iter()
-            .zip(self.state.intervals.iter_mut())
-        {
-            if condition_matches(entry.condition(), interval, now) {
+            if condition_matches(entry.condition(), interval, now)
+                && entry
+                    .signal_on_tools()
+                    .iter()
+                    .any(|pattern| pattern.matches(tool))
+            {
                 messages.push(entry.message().to_owned());
                 interval.reset(now);
             }
@@ -243,16 +276,10 @@ impl IntervalState {
 /// A command-hook observation fed to [`evolve`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Event {
-    /// A tool is about to run. Failed invocations also emit this event.
+    /// A tool is about to run. This is the only event that may deny.
     ToolBefore {
         /// Observed tool name.
         tool: String,
-        /// Event timestamp.
-        now_ms: TimestampMillis,
-    },
-
-    /// A tool finished successfully or failed. Both outcomes use this event.
-    ToolAfter {
         /// Event timestamp.
         now_ms: TimestampMillis,
     },
@@ -269,9 +296,7 @@ pub(crate) enum Event {
 impl Event {
     fn now_ms(&self) -> TimestampMillis {
         match self {
-            Self::ToolBefore { now_ms, .. }
-            | Self::ToolAfter { now_ms }
-            | Self::Observed { now_ms, .. } => *now_ms,
+            Self::ToolBefore { now_ms, .. } | Self::Observed { now_ms, .. } => *now_ms,
         }
     }
 }
@@ -320,11 +345,17 @@ impl ReminderMessages {
 /// The result of applying one event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Output {
-    /// No reminder is due; continue without publishing anything.
+    /// No rule fired; the tool call proceeds without comment.
     Continue,
 
-    /// Publish these reminder messages in order.
-    Emit {
+    /// Soft-deny the tool call that triggered this evaluation.
+    ///
+    /// The denial is delivered as the tool call's denial reason, not as
+    /// post-hoc context, so the model sees it before the action happens and
+    /// may immediately retry. Every rule that fired has already had its
+    /// interval reset, so the retry starts each of those rules' intervals
+    /// fresh.
+    Deny {
         /// Non-empty messages from matched rules, in configuration order.
         messages: ReminderMessages,
     },
@@ -339,13 +370,11 @@ pub(crate) fn evolve(mut bound: BoundSession<'_>, event: Event) -> (SessionState
     let now = event.now_ms();
     let output = match event {
         Event::ToolBefore { tool, .. } => {
-            bound.apply_tool_before(&tool, now);
-            Output::Continue
+            match ReminderMessages::from_vec(bound.apply_pre_tool(&tool, now)) {
+                Some(messages) => Output::Deny { messages },
+                None => Output::Continue,
+            }
         }
-        Event::ToolAfter { .. } => match ReminderMessages::from_vec(bound.evaluate(now)) {
-            Some(messages) => Output::Emit { messages },
-            None => Output::Continue,
-        },
         Event::Observed { event, .. } => {
             bound.observe(event);
             Output::Continue
@@ -369,6 +398,7 @@ fn condition_counts_tool(condition: &Condition, tool: &str) -> bool {
     }
 }
 
+/// Evaluates whether `condition` is satisfied.
 fn condition_matches(
     condition: &Condition,
     interval: &IntervalState,
@@ -412,7 +442,13 @@ mod tests {
         agents: {
             Orchestrator: [{
                 message: "Remember your prompt obligations.",
-                condition: { type: "toolCalls", count: 5 }
+                resetTools: [],
+                signalOnTools: ["bash"],
+                condition: {
+                    type: "toolCalls",
+                    count: 5,
+                    tools: ["bash"],
+                }
             }]
         }
     }"#;
@@ -450,14 +486,6 @@ mod tests {
         )
     }
 
-    fn tool_after(
-        policy: &Policy,
-        state: SessionState,
-        now: TimestampMillis,
-    ) -> (SessionState, Output) {
-        evolve(bind(policy, state), Event::ToolAfter { now_ms: now })
-    }
-
     fn observe(
         policy: &Policy,
         state: SessionState,
@@ -471,13 +499,13 @@ mod tests {
         assert_eq!(output, &Output::Continue);
     }
 
-    fn assert_emits(output: &Output, message: &str) {
+    fn assert_denies(output: &Output, message: &str) {
         match output {
-            Output::Emit { messages } => {
+            Output::Deny { messages } => {
                 assert_eq!(messages.iter().collect::<Vec<_>>(), [message]);
                 assert_eq!(messages.join("\n"), message);
             }
-            Output::Continue => panic!("expected reminder {message:?}, got Continue"),
+            Output::Continue => panic!("expected denial {message:?}, got Continue"),
         }
     }
 
@@ -503,18 +531,28 @@ mod tests {
     }
 
     #[test]
-    fn every_matching_rule_emits_its_message_in_configuration_order() {
+    fn every_matching_rule_denies_in_configuration_order() {
         let policy = make_policy(
             r#"{
                 agents: {
                     Orchestrator: [
                         {
                             message: "First reminder.",
-                            condition: { type: "elapsedTime", seconds: 0.001 }
+                            resetTools: [],
+                signalOnTools: ["*"],
+                            condition: {
+                                type: "elapsedTime",
+                                seconds: 0.001,
+                            }
                         },
                         {
                             message: "Second reminder.",
-                            condition: { type: "elapsedTime", seconds: 0.001 }
+                            resetTools: [],
+                signalOnTools: ["*"],
+                            condition: {
+                                type: "elapsedTime",
+                                seconds: 0.001,
+                            }
                         }
                     ]
                 }
@@ -522,21 +560,21 @@ mod tests {
         );
         let state = fresh_state(&policy, timestamp(0));
 
-        let (_, output) = tool_after(&policy, state, timestamp(10));
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(10));
         match output {
-            Output::Emit { messages } => {
+            Output::Deny { messages } => {
                 assert_eq!(
                     messages.iter().collect::<Vec<_>>(),
                     ["First reminder.", "Second reminder."]
                 );
                 assert_eq!(messages.join(" "), "First reminder. Second reminder.");
             }
-            Output::Continue => panic!("expected two reminders, got Continue"),
+            Output::Continue => panic!("expected two denial messages, got Continue"),
         }
     }
 
     #[test]
-    fn fifth_matching_call_emits_and_the_interval_repeats() {
+    fn the_nth_call_is_denied_not_the_nth_plus_one() {
         let policy = make_policy(FIFTH_TOOL_CALL);
         let mut state = fresh_state(&policy, timestamp(0));
 
@@ -544,38 +582,25 @@ mod tests {
             let (next, output) = tool_before(&policy, state, "bash", timestamp(call));
             assert_continue(&output);
             state = next;
-
-            let (next, output) = tool_after(&policy, state, timestamp(call));
-            assert_continue(&output);
-            state = next;
         }
 
+        // The fifth call reaches the threshold and must itself be denied.
         let (next, output) = tool_before(&policy, state, "bash", timestamp(10));
-        assert_continue(&output);
-        state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(10));
-        assert_emits(&output, "Remember your prompt obligations.");
+        assert_denies(&output, "Remember your prompt obligations.");
         state = next;
 
         for call in 11..15 {
             let (next, output) = tool_before(&policy, state, "bash", timestamp(call));
             assert_continue(&output);
             state = next;
-
-            let (next, output) = tool_after(&policy, state, timestamp(call));
-            assert_continue(&output);
-            state = next;
         }
 
-        let (next, output) = tool_before(&policy, state, "bash", timestamp(15));
-        assert_continue(&output);
-        state = next;
-        let (_, output) = tool_after(&policy, state, timestamp(15));
-        assert_emits(&output, "Remember your prompt obligations.");
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(15));
+        assert_denies(&output, "Remember your prompt obligations.");
     }
 
     #[test]
-    fn failed_calls_count_at_before_and_are_evaluated_at_after() {
+    fn a_denial_resets_counts_so_the_immediate_retry_is_allowed() {
         let policy = make_policy(FIFTH_TOOL_CALL);
         let mut state = fresh_state(&policy, timestamp(0));
 
@@ -583,19 +608,113 @@ mod tests {
             let (next, output) = tool_before(&policy, state, "bash", timestamp(call));
             assert_continue(&output);
             state = next;
-            let (next, output) = tool_after(&policy, state, timestamp(call));
-            assert_continue(&output);
-            state = next;
         }
 
         let (next, output) = tool_before(&policy, state, "bash", timestamp(10));
+        assert_denies(&output, "Remember your prompt obligations.");
+        state = next;
+
+        // The interval was fully reset by the denial, so the very next call
+        // with the same tool is allowed through.
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(11));
+        assert_continue(&output);
+    }
+
+    #[test]
+    fn reset_tool_is_never_denied_even_at_threshold() {
+        let policy = make_policy(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "Remember your prompt obligations.",
+                        resetTools: ["task"],
+                signalOnTools: ["*"],
+                        condition: {
+                            type: "elapsedTime",
+                            seconds: 0.001,
+                        }
+                    }]
+                }
+            }"#,
+        );
+        let state = fresh_state(&policy, timestamp(0));
+
+        // "task" matches the reset pattern; the reset branch takes priority,
+        // so this call is never denied even though the elapsed-time
+        // condition would already be satisfied for any other tool.
+        let (_, output) = tool_before(&policy, state, "task", timestamp(10));
+        assert_continue(&output);
+    }
+
+    #[test]
+    fn latched_pre_compact_denies_the_next_call_for_any_uncounted_tool() {
+        let policy = make_policy(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "Compaction reminder.",
+                        resetTools: [],
+                signalOnTools: ["*"],
+                        condition: {
+                            type: "event",
+                            event: "preCompact",
+                        }
+                    }]
+                }
+            }"#,
+        );
+        let mut state = fresh_state(&policy, timestamp(0));
+
+        let (next, output) = observe(&policy, state, ObservedEvent::PreCompact, timestamp(10));
         assert_continue(&output);
         state = next;
 
-        // A failed fifth call is still represented by ToolAfter; the machine
-        // has no success flag and emits at this point.
-        let (_, output) = tool_after(&policy, state, timestamp(10));
-        assert_emits(&output, "Remember your prompt obligations.");
+        // No toolCalls condition exists anywhere in this rule, so this tool
+        // was never counted, yet the bare preCompact latch still fires.
+        let (next, output) = tool_before(&policy, state, "some_unrelated_tool", timestamp(20));
+        assert_denies(&output, "Compaction reminder.");
+        state = next;
+
+        let (_, output) = tool_before(&policy, state, "some_unrelated_tool", timestamp(30));
+        assert_continue(&output);
+    }
+
+    #[test]
+    fn bare_elapsed_time_rule_fires_only_after_the_interval_on_any_tool() {
+        let policy = make_policy(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "Time reminder.",
+                        resetTools: [],
+                signalOnTools: ["*"],
+                        condition: {
+                            type: "elapsedTime",
+                            seconds: 0.5,
+                        }
+                    }]
+                }
+            }"#,
+        );
+        let mut state = fresh_state(&policy, timestamp(1000));
+
+        // No toolCalls condition exists in this rule either; the tool below
+        // is never counted, but the elapsed-time condition is still
+        // evaluated on every preToolUse call.
+        let (next, output) = tool_before(&policy, state, "some_unrelated_tool", timestamp(1499));
+        assert_continue(&output);
+        state = next;
+
+        let (next, output) = tool_before(&policy, state, "some_unrelated_tool", timestamp(1500));
+        assert_denies(&output, "Time reminder.");
+        state = next;
+
+        let (next, output) = tool_before(&policy, state, "some_unrelated_tool", timestamp(1999));
+        assert_continue(&output);
+        state = next;
+
+        let (_, output) = tool_before(&policy, state, "some_unrelated_tool", timestamp(2000));
+        assert_denies(&output, "Time reminder.");
     }
 
     #[test]
@@ -606,7 +725,12 @@ mod tests {
                     Orchestrator: [{
                         message: "Remember your prompt obligations.",
                         resetTools: ["task"],
-                        condition: { type: "toolCalls", count: 2, tools: ["bash"] }
+                signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 2,
+                            tools: ["bash"],
+                        }
                     }]
                 }
             }"#,
@@ -614,9 +738,6 @@ mod tests {
         let mut state = fresh_state(&policy, timestamp(0));
 
         let (next, output) = tool_before(&policy, state, "bash", timestamp(1));
-        assert_continue(&output);
-        state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(1));
         assert_continue(&output);
         state = next;
 
@@ -627,15 +748,9 @@ mod tests {
         let (next, output) = tool_before(&policy, state, "bash", timestamp(3));
         assert_continue(&output);
         state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(3));
-        assert_continue(&output);
-        state = next;
 
-        let (next, output) = tool_before(&policy, state, "bash", timestamp(4));
-        assert_continue(&output);
-        state = next;
-        let (_, output) = tool_after(&policy, state, timestamp(4));
-        assert_emits(&output, "Remember your prompt obligations.");
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(4));
+        assert_denies(&output, "Remember your prompt obligations.");
     }
 
     #[test]
@@ -646,11 +761,23 @@ mod tests {
                     Orchestrator: [
                         {
                             message: "First reminder.",
-                            condition: { type: "toolCalls", count: 2, tools: ["bash"] }
+                            resetTools: [],
+                signalOnTools: ["*"],
+                            condition: {
+                                type: "toolCalls",
+                                count: 2,
+                                tools: ["bash"],
+                            }
                         },
                         {
                             message: "Second reminder.",
-                            condition: { type: "toolCalls", count: 2, tools: ["powershell"] }
+                            resetTools: [],
+                signalOnTools: ["*"],
+                            condition: {
+                                type: "toolCalls",
+                                count: 2,
+                                tools: ["powershell"],
+                            }
                         }
                     ]
                 }
@@ -661,28 +788,19 @@ mod tests {
         let (next, output) = tool_before(&policy, state, "bash", timestamp(1));
         assert_continue(&output);
         state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(1));
-        assert_continue(&output);
-        state = next;
 
         for call in 2..4 {
             let (next, output) = tool_before(&policy, state, "powershell", timestamp(call));
-            assert_continue(&output);
-            state = next;
-            let (next, output) = tool_after(&policy, state, timestamp(call));
-            if call == 2 {
-                assert_continue(&output);
+            if call == 3 {
+                assert_denies(&output, "Second reminder.");
             } else {
-                assert_emits(&output, "Second reminder.");
+                assert_continue(&output);
             }
             state = next;
         }
 
-        let (next, output) = tool_before(&policy, state, "bash", timestamp(5));
-        assert_continue(&output);
-        state = next;
-        let (_, output) = tool_after(&policy, state, timestamp(5));
-        assert_emits(&output, "First reminder.");
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(5));
+        assert_denies(&output, "First reminder.");
     }
 
     #[test]
@@ -692,15 +810,27 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "Composite reminder.",
+                        resetTools: [],
+                signalOnTools: ["*"],
                         condition: {
                             type: "all",
                             conditions: [
-                                { type: "toolCalls", count: 2, tools: ["bash"] },
+                                {
+                                    type: "toolCalls",
+                                    count: 2,
+                                    tools: ["bash"],
+                                },
                                 {
                                     type: "any",
                                     conditions: [
-                                        { type: "elapsedTime", seconds: 0.2 },
-                                        { type: "event", event: "preCompact" }
+                                        {
+                                            type: "elapsedTime",
+                                            seconds: 0.2,
+                                        },
+                                        {
+                                            type: "event",
+                                            event: "preCompact",
+                                        }
                                     ]
                                 }
                             ]
@@ -714,62 +844,20 @@ mod tests {
         let (next, output) = tool_before(&policy, state, "bash", timestamp(10));
         assert_continue(&output);
         state = next;
-        let (next, output) = tool_before(&policy, state, "bash", timestamp(20));
-        assert_continue(&output);
-        state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(20));
-        assert_continue(&output);
-        state = next;
 
         let (next, output) = observe(&policy, state, ObservedEvent::PreCompact, timestamp(30));
         assert_continue(&output);
         state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(40));
-        assert_emits(&output, "Composite reminder.");
+
+        let (next, output) = tool_before(&policy, state, "bash", timestamp(40));
+        assert_denies(&output, "Composite reminder.");
         state = next;
 
         let (next, output) = tool_before(&policy, state, "bash", timestamp(50));
         assert_continue(&output);
         state = next;
-        let (next, output) = tool_before(&policy, state, "bash", timestamp(60));
-        assert_continue(&output);
-        state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(60));
-        assert_continue(&output);
-        state = next;
-        let (_, output) = tool_after(&policy, state, timestamp(240));
-        assert_emits(&output, "Composite reminder.");
-    }
-
-    #[test]
-    fn elapsed_time_accepts_fractional_seconds_and_resets_on_emit() {
-        let policy = make_policy(
-            r#"{
-                agents: {
-                    Orchestrator: [{
-                        message: "Time reminder.",
-                        resetTools: [],
-                        condition: { type: "elapsedTime", seconds: 0.5 }
-                    }]
-                }
-            }"#,
-        );
-        let mut state = fresh_state(&policy, timestamp(1000));
-
-        let (next, output) = tool_after(&policy, state, timestamp(1499));
-        assert_continue(&output);
-        state = next;
-
-        let (next, output) = tool_after(&policy, state, timestamp(1500));
-        assert_emits(&output, "Time reminder.");
-        state = next;
-
-        let (next, output) = tool_after(&policy, state, timestamp(1999));
-        assert_continue(&output);
-        state = next;
-
-        let (_, output) = tool_after(&policy, state, timestamp(2000));
-        assert_emits(&output, "Time reminder.");
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(260));
+        assert_denies(&output, "Composite reminder.");
     }
 
     #[test]
@@ -779,10 +867,12 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "Wildcard reminder.",
+                        resetTools: [],
+                signalOnTools: ["*"],
                         condition: {
                             type: "toolCalls",
                             count: 2,
-                            tools: ["bash*", "bash"]
+                            tools: ["bash*", "bash"],
                         }
                     }]
                 }
@@ -793,29 +883,32 @@ mod tests {
         let (next, output) = tool_before(&policy, state, "bash", timestamp(1));
         assert_continue(&output);
         state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(1));
-        assert_continue(&output);
-        state = next;
 
-        let (next, output) = tool_before(&policy, state, "bash", timestamp(2));
-        assert_continue(&output);
-        state = next;
-        let (_, output) = tool_after(&policy, state, timestamp(2));
-        assert_emits(&output, "Wildcard reminder.");
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(2));
+        assert_denies(&output, "Wildcard reminder.");
     }
 
     #[test]
-    fn pre_compact_is_latched_and_evaluated_by_later_post_tool_events() {
+    fn pre_compact_is_latched_and_evaluated_by_the_next_tool_call() {
         let policy = make_policy(
             r#"{
                 agents: {
                     Orchestrator: [{
                         message: "Compaction reminder.",
+                        resetTools: [],
+                signalOnTools: ["*"],
                         condition: {
                             type: "all",
                             conditions: [
-                                { type: "event", event: "preCompact" },
-                                { type: "toolCalls", count: 1, tools: ["bash"] }
+                                {
+                                    type: "event",
+                                    event: "preCompact",
+                                },
+                                {
+                                    type: "toolCalls",
+                                    count: 1,
+                                    tools: ["bash"],
+                                }
                             ]
                         }
                     }]
@@ -828,18 +921,11 @@ mod tests {
         assert_continue(&output);
         state = next;
 
-        let (next, output) = tool_after(&policy, state, timestamp(20));
-        assert_continue(&output);
-        state = next;
-
         let (next, output) = tool_before(&policy, state, "bash", timestamp(30));
-        assert_continue(&output);
-        state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(30));
-        assert_emits(&output, "Compaction reminder.");
+        assert_denies(&output, "Compaction reminder.");
         state = next;
 
-        let (_, output) = tool_after(&policy, state, timestamp(40));
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(40));
         assert_continue(&output);
     }
 
@@ -851,11 +937,19 @@ mod tests {
                     Orchestrator: [{
                         message: "Compaction reminder.",
                         resetTools: ["task"],
+                signalOnTools: ["*"],
                         condition: {
                             type: "all",
                             conditions: [
-                                { type: "event", event: "preCompact" },
-                                { type: "toolCalls", count: 1, tools: ["bash"] }
+                                {
+                                    type: "event",
+                                    event: "preCompact",
+                                },
+                                {
+                                    type: "toolCalls",
+                                    count: 1,
+                                    tools: ["bash"],
+                                }
                             ]
                         }
                     }]
@@ -875,17 +969,15 @@ mod tests {
         let (next, output) = tool_before(&policy, state, "bash", timestamp(30));
         assert_continue(&output);
         state = next;
-        let (next, output) = tool_after(&policy, state, timestamp(30));
-        assert_continue(&output);
-        state = next;
 
         // The earlier bash count is still present, so a fresh latch now
         // satisfies the composite condition.
         let (next, output) = observe(&policy, state, ObservedEvent::PreCompact, timestamp(40));
         assert_continue(&output);
         state = next;
-        let (_, output) = tool_after(&policy, state, timestamp(50));
-        assert_emits(&output, "Compaction reminder.");
+
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(50));
+        assert_denies(&output, "Compaction reminder.");
     }
 
     #[test]
@@ -947,11 +1039,20 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "Resumed reminder.",
+                        resetTools: [],
+                signalOnTools: ["*"],
                         condition: {
                             type: "all",
                             conditions: [
-                                { type: "event", event: "preCompact" },
-                                { type: "toolCalls", count: 3, tools: ["bash"] }
+                                {
+                                    type: "event",
+                                    event: "preCompact",
+                                },
+                                {
+                                    type: "toolCalls",
+                                    count: 3,
+                                    tools: ["bash"],
+                                }
                             ]
                         }
                     }]
@@ -962,9 +1063,6 @@ mod tests {
 
         for call in 0..2 {
             let (next, output) = tool_before(&policy, state, "bash", timestamp(call));
-            assert_continue(&output);
-            state = next;
-            let (next, output) = tool_after(&policy, state, timestamp(call));
             assert_continue(&output);
             state = next;
         }
@@ -979,16 +1077,14 @@ mod tests {
         let bound = BoundSession::restore(&policy, restored)
             .expect("restored state should match the policy");
 
-        let (next, output) = evolve(
+        let (_, output) = evolve(
             bound,
             Event::ToolBefore {
                 tool: "bash".to_owned(),
                 now_ms: timestamp(20),
             },
         );
-        assert_continue(&output);
-        let (_, output) = tool_after(&policy, next, timestamp(20));
-        assert_emits(&output, "Resumed reminder.");
+        assert_denies(&output, "Resumed reminder.");
     }
 
     #[test]
@@ -998,7 +1094,13 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "Old reminder.",
-                        condition: { type: "toolCalls", count: 3, tools: ["bash"] }
+                        resetTools: [],
+                signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 3,
+                            tools: ["bash"],
+                        }
                     }]
                 }
             }"#,
@@ -1008,7 +1110,13 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "New reminder.",
-                        condition: { type: "toolCalls", count: 3, tools: ["bash"] }
+                        resetTools: [],
+                signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 3,
+                            tools: ["bash"],
+                        }
                     }]
                 }
             }"#,
@@ -1020,9 +1128,6 @@ mod tests {
             let (next, output) = tool_before(&old_policy, state, "bash", timestamp(call));
             assert_continue(&output);
             state = next;
-            let (next, output) = tool_after(&old_policy, state, timestamp(call));
-            assert_continue(&output);
-            state = next;
         }
 
         assert!(matches!(
@@ -1030,23 +1135,15 @@ mod tests {
             Err(StateError::PolicyMismatch)
         ));
         let mut state = fresh_state(&new_policy, timestamp(1000));
-        let (next, output) = tool_after(&new_policy, state, timestamp(1000));
-        assert_continue(&output);
-        state = next;
 
         for call in 1001..1003 {
             let (next, output) = tool_before(&new_policy, state, "bash", timestamp(call));
             assert_continue(&output);
             state = next;
-            let (next, output) = tool_after(&new_policy, state, timestamp(call));
-            assert_continue(&output);
-            state = next;
         }
 
-        let (next, output) = tool_before(&new_policy, state, "bash", timestamp(1003));
-        assert_continue(&output);
-        let (_, output) = tool_after(&new_policy, next, timestamp(1003));
-        assert_emits(&output, "New reminder.");
+        let (_, output) = tool_before(&new_policy, state, "bash", timestamp(1003));
+        assert_denies(&output, "New reminder.");
     }
 
     #[test]
@@ -1056,7 +1153,13 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "Reset reminder.",
-                        condition: { type: "toolCalls", count: 3, tools: ["bash"] }
+                        resetTools: [],
+                signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 3,
+                            tools: ["bash"],
+                        }
                     }]
                 }
             }"#,
@@ -1064,9 +1167,6 @@ mod tests {
         let mut state = fresh_state(&policy, timestamp(0));
         for call in 0..2 {
             let (next, output) = tool_before(&policy, state, "bash", timestamp(call));
-            assert_continue(&output);
-            state = next;
-            let (next, output) = tool_after(&policy, state, timestamp(call));
             assert_continue(&output);
             state = next;
         }
@@ -1081,24 +1181,14 @@ mod tests {
             Err(StateError::ZeroToolCount { .. })
         ));
 
-        let (mut state, output) = tool_after(
-            &policy,
-            fresh_state(&policy, timestamp(500)),
-            timestamp(500),
-        );
-        assert_continue(&output);
+        let mut state = fresh_state(&policy, timestamp(500));
         for call in 501..503 {
             let (next, output) = tool_before(&policy, state, "bash", timestamp(call));
             assert_continue(&output);
             state = next;
-            let (next, output) = tool_after(&policy, state, timestamp(call));
-            assert_continue(&output);
-            state = next;
         }
         let (state, output) = tool_before(&policy, state, "bash", timestamp(503));
-        assert_continue(&output);
-        let (state, output) = tool_after(&policy, state, timestamp(503));
-        assert_emits(&output, "Reset reminder.");
+        assert_denies(&output, "Reset reminder.");
 
         let mut missing =
             serde_json::to_value(&state).expect("session state should serialize to a JSON value");
@@ -1109,9 +1199,11 @@ mod tests {
             BoundSession::restore(&policy, tampered),
             Err(StateError::IntervalCountMismatch { .. })
         ));
-        let (_, output) = tool_after(
+
+        let (_, output) = tool_before(
             &policy,
             fresh_state(&policy, timestamp(600)),
+            "bash",
             timestamp(600),
         );
         assert_continue(&output);
@@ -1135,11 +1227,113 @@ mod tests {
             })
         ));
 
-        let (_, output) = tool_after(
+        let (_, output) = tool_before(
             &policy,
             fresh_state(&policy, timestamp(100)),
+            "bash",
             timestamp(100),
         );
         assert_continue(&output);
+    }
+
+    #[test]
+    fn a_satisfied_tool_calls_rule_is_not_consumed_by_a_non_signal_eligible_tool() {
+        let policy = make_policy(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "Remember your prompt obligations.",
+                        resetTools: [],
+                        signalOnTools: ["bash"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 2,
+                            tools: ["bash"],
+                        }
+                    }]
+                }
+            }"#,
+        );
+        let mut state = fresh_state(&policy, timestamp(0));
+
+        let (next, output) = tool_before(&policy, state, "bash", timestamp(1));
+        assert_continue(&output);
+        state = next;
+
+        // "view" is counted nowhere and is not in signalOnTools, so it
+        // neither denies nor consumes the rule's armed state.
+        let (next, output) = tool_before(&policy, state, "view", timestamp(2));
+        assert_continue(&output);
+        state = next;
+
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(3));
+        assert_denies(&output, "Remember your prompt obligations.");
+    }
+
+    #[test]
+    fn signal_on_tools_narrower_than_tools_leaves_the_rule_armed_for_other_counted_tools() {
+        let policy = make_policy(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "Remember your prompt obligations.",
+                        resetTools: [],
+                        signalOnTools: ["bash"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 1,
+                            tools: ["bash", "powershell"],
+                        }
+                    }]
+                }
+            }"#,
+        );
+        let mut state = fresh_state(&policy, timestamp(0));
+
+        // "powershell" is counted and reaches the threshold, but it is not
+        // in signalOnTools, so it is not denied and does not reset the
+        // interval; the rule stays armed.
+        let (next, output) = tool_before(&policy, state, "powershell", timestamp(1));
+        assert_continue(&output);
+        state = next;
+
+        let (_, output) = tool_before(&policy, state, "bash", timestamp(2));
+        assert_denies(&output, "Remember your prompt obligations.");
+    }
+
+    #[test]
+    fn signal_on_tools_broader_than_tools_can_deny_an_uncounted_tool() {
+        let policy = make_policy(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "Remember your prompt obligations.",
+                        resetTools: [],
+                        signalOnTools: ["view"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 2,
+                            tools: ["bash"],
+                        }
+                    }]
+                }
+            }"#,
+        );
+        let mut state = fresh_state(&policy, timestamp(0));
+
+        let (next, output) = tool_before(&policy, state, "bash", timestamp(1));
+        assert_continue(&output);
+        state = next;
+
+        // "bash" reaches the threshold but is not itself in signalOnTools,
+        // so this call neither denies nor resets; the rule stays armed.
+        let (next, output) = tool_before(&policy, state, "bash", timestamp(2));
+        assert_continue(&output);
+        state = next;
+
+        // "view" is never counted, but it matches signalOnTools and the
+        // condition is already satisfied, so it carries the denial.
+        let (_, output) = tool_before(&policy, state, "view", timestamp(3));
+        assert_denies(&output, "Remember your prompt obligations.");
     }
 }

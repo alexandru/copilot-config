@@ -4,10 +4,17 @@
 //! configuration and state discovery, persistence, and Copilot's stdout and
 //! exit-code protocol. State transitions stay in [`crate::machine`].
 //!
-//! Every failure is fail-open. The adapter writes `{}` and exits successfully
-//! even for a failed `preToolUse` invocation; the only non-zero exit is the
-//! documented `postToolUseFailure` recovery path after a reminder has been
-//! committed to persistent state.
+//! Every failure is fail-open. The adapter always writes `{}` and exits 0 on
+//! any error path. The only output other than `{}` is a documented
+//! `preToolUse` soft deny, which also exits 0: Copilot treats any nonzero
+//! exit on `preToolUse` as a fail-closed deny, so a crash or a bad
+//! configuration must never look like that.
+//!
+//! `--validate` is a deliberate exception to that invariant. It never reads
+//! stdin or touches state, and it is meant to be run at build/install time so
+//! a binary/configuration mismatch (for example a required field the
+//! installed binary predates) fails the build loudly instead of silently
+//! no-opping once it reaches a live hook invocation.
 
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -33,30 +40,38 @@ const DEFAULT_CONFIG_DIRECTORY: &str = ".copilot";
 const DEFAULT_STATE_DIRECTORY: &str = ".agents/sessions/copilot";
 /// Upper bound for a hook payload read from stdin.
 const MAX_STDIN_BYTES: usize = 16 * 1024 * 1024;
-/// Separator used when one transition emits several reminders.
+/// Separator used when one transition denies with several reminders.
 const MESSAGE_SEPARATOR: &str = "\n\n";
 /// Exact no-action output expected by Copilot command hooks.
 const CONTINUE_OUTPUT: &str = "{}\n";
-/// `postToolUseFailure` exit code that makes Copilot append stdout to the
-/// failed tool result as recovery guidance.
-const FAILURE_RECOVERY_EXIT_CODE: u8 = 2;
 
 const HELP: &str = "\
 copilot-agent-reminders: Copilot command-hook reminders
 
 Usage:
   copilot-agent-reminders --agent <agent> --event <event> [--config <path>] [--state-dir <path>]
+  copilot-agent-reminders --validate [--config <path>]
 
 Events:
-  preToolUse, postToolUse, postToolUseFailure, preCompact, sessionStart
+  preToolUse, preCompact, sessionStart
+
+Validation mode:
+  --validate checks that a configuration file parses and reports its agent
+  and rule counts. It never reads stdin and never touches session state, so
+  --state-dir, --agent, and --event are rejected alongside it. Unlike every
+  other mode, --validate is fail-closed: a missing, unreadable, or invalid
+  configuration exits 1 with the diagnostic on stderr. A configuration that
+  parses but configures no agents exits 0 with a warning on stderr, since an
+  intentionally empty configuration disables all reminders. Run this at
+  build/install time to catch a stale binary paired with a newer
+  configuration before it reaches a live hook invocation.
 
 Hook registration:
-  Hook registrations MUST use camelCase event keys: preToolUse, postToolUse,
-  postToolUseFailure, preCompact, sessionStart. These keys deliver camelCase
-  payload fields and a numeric Unix-millisecond timestamp. PascalCase aliases
-  deliver snake_case fields and ISO-8601 timestamps and are not supported.
-  The registration key, not the --event spelling, determines the payload
-  format.
+  Hook registrations MUST use camelCase event keys: preToolUse, preCompact,
+  sessionStart. These keys deliver camelCase payload fields and a numeric
+  Unix-millisecond timestamp. PascalCase aliases deliver snake_case fields and
+  ISO-8601 timestamps and are not supported. The registration key, not the
+  --event spelling, determines the payload format.
 
 Configuration:
   JSON5 read from $COPILOT_HOME/agent-reminders.jsonc, or from
@@ -71,9 +86,12 @@ Configuration:
   and exits 0.
 
 Output:
-  postToolUse reminders are written as additionalContext JSON. A
-  postToolUseFailure reminder prints the reminder text and exits 2 so Copilot
-  appends it to the failed tool result.
+  A preToolUse call whose rules fire is soft-denied: the hook prints
+  {\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"<messages>\"}
+  and exits 0. Copilot delivers the reason as the tool call's denial, so the
+  model sees it before the action happens and may immediately retry; a
+  denial fully resets every rule that fired. Every other outcome, including
+  every error, prints {} and exits 0.
 ";
 
 /// Runs the command hook with arguments after the executable name.
@@ -92,7 +110,39 @@ where
         return ExitCode::SUCCESS;
     }
 
-    match dispatch(&args) {
+    // `--validate` never reads stdin, so a literal scan for the flag decides
+    // whether to drain stdin before argument parsing. Every other invocation
+    // keeps draining stdin unconditionally first, even on an argument error,
+    // so Copilot's stdin write never fails just because the arguments turned
+    // out to be invalid.
+    let wants_validate = args
+        .iter()
+        .any(|argument| argument == OsStr::new("--validate"));
+
+    if wants_validate {
+        return match parse_mode(&args) {
+            Ok(Mode::Validate { config }) => validate(config.as_deref()),
+            Ok(Mode::Invoke(_)) => unreachable!("wants_validate implies Mode::Validate"),
+            Err(error) => validate_failure(&error),
+        };
+    }
+
+    let input = read_input();
+    let mode = match parse_mode(&args) {
+        Ok(mode) => mode,
+        Err(error) => {
+            report(&error);
+            let _ = write_stdout(CONTINUE_OUTPUT);
+            return ExitCode::SUCCESS;
+        }
+    };
+
+    let options = match mode {
+        Mode::Invoke(options) => options,
+        Mode::Validate { .. } => unreachable!("wants_validate is false here"),
+    };
+
+    match dispatch(options, input) {
         Ok(result) => result.write(),
         Err(error) => {
             report(&error);
@@ -102,7 +152,21 @@ where
     }
 }
 
-/// Parsed command-line options.
+/// The two mutually exclusive ways this executable can be invoked.
+///
+/// Representing the modes as an enum rather than an optional flag on
+/// [`Options`] makes `--validate` combined with `--agent`, `--event`, or
+/// `--state-dir` a parse error instead of a state that has to be checked
+/// after the fact.
+#[derive(Debug)]
+enum Mode {
+    /// Fail-closed configuration check; see the module docs.
+    Validate { config: Option<PathBuf> },
+    /// The ordinary fail-open hook invocation.
+    Invoke(Options),
+}
+
+/// Parsed command-line options for a hook invocation.
 #[derive(Debug)]
 struct Options {
     agent: String,
@@ -115,8 +179,6 @@ struct Options {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HookEvent {
     PreToolUse,
-    PostToolUse,
-    PostToolUseFailure,
     PreCompact,
     SessionStart,
 }
@@ -125,13 +187,10 @@ impl HookEvent {
     fn parse(value: &str) -> Result<Self, HookError> {
         match value {
             "preToolUse" => Ok(Self::PreToolUse),
-            "postToolUse" => Ok(Self::PostToolUse),
-            "postToolUseFailure" => Ok(Self::PostToolUseFailure),
             "preCompact" => Ok(Self::PreCompact),
             "sessionStart" => Ok(Self::SessionStart),
             other => Err(HookError::Arguments(format!(
-                "unknown event {other:?}; expected one of preToolUse, postToolUse, \
-                 postToolUseFailure, preCompact, sessionStart"
+                "unknown event {other:?}; expected one of preToolUse, preCompact, sessionStart"
             ))),
         }
     }
@@ -140,8 +199,6 @@ impl HookEvent {
     const fn name(self) -> &'static str {
         match self {
             Self::PreToolUse => "preToolUse",
-            Self::PostToolUse => "postToolUse",
-            Self::PostToolUseFailure => "postToolUseFailure",
             Self::PreCompact => "preCompact",
             Self::SessionStart => "sessionStart",
         }
@@ -191,31 +248,29 @@ impl HookResult {
                 let _ = write_stdout(CONTINUE_OUTPUT);
                 ExitCode::SUCCESS
             }
-            Output::Emit { messages } => {
+            Output::Deny { messages } => {
                 let joined = messages.join(MESSAGE_SEPARATOR);
-                write_reminders(&self.delivery, &joined)
+                write_deny(&self.delivery, &joined)
             }
         }
     }
 }
 
-/// Writes reminder output and logs the delivery only after stdout succeeds.
-fn write_reminders(delivery: &Delivery, joined: &str) -> ExitCode {
-    if delivery.event == HookEvent::PostToolUseFailure {
-        return match write_stdout(&format!("{joined}\n")) {
-            Ok(()) => {
-                log_delivery(delivery);
-                ExitCode::from(FAILURE_RECOVERY_EXIT_CODE)
-            }
-            Err(_) => ExitCode::SUCCESS,
-        };
-    }
-
-    let payload = serde_json::json!({ "additionalContext": joined });
+/// Writes the soft-deny response and logs the delivery only after stdout
+/// succeeds. Always exits 0: a nonzero exit on `preToolUse` is interpreted by
+/// Copilot as a fail-closed deny, so a serialization failure here falls back
+/// to the plain `{}` continue response rather than ever exiting nonzero.
+fn write_deny(delivery: &Delivery, joined: &str) -> ExitCode {
+    let payload = serde_json::json!({
+        "permissionDecision": "deny",
+        "permissionDecisionReason": joined,
+    });
     match serde_json::to_string(&payload) {
         Ok(json) => {
             if write_stdout(&format!("{json}\n")).is_ok() {
                 log_delivery(delivery);
+            } else {
+                let _ = write_stdout(CONTINUE_OUTPUT);
             }
         }
         Err(_) => {
@@ -230,7 +285,7 @@ fn log_delivery(delivery: &Delivery) {
     let mut stderr = stderr.lock();
     let _ = writeln!(
         stderr,
-        "copilot-agent-reminders: info: emitted sessionId={} agent={} timestamp={} event={} messages={}",
+        "copilot-agent-reminders: info: denied sessionId={} agent={} timestamp={} event={} messages={}",
         log_identifier(&delivery.session_id),
         log_identifier(&delivery.agent),
         delivery.observed_at_ms,
@@ -281,7 +336,7 @@ enum HookError {
     ConfigInvalid {
         path: String,
         #[source]
-        source: ConfigError,
+        source: Box<ConfigError>,
     },
 
     #[error("could not open session state: {0}")]
@@ -300,12 +355,10 @@ enum HookError {
     WriteState(#[source] io::Error),
 }
 
-fn dispatch(args: &[OsString]) -> Result<HookResult, HookError> {
-    // Read the payload before any fallible validation so Copilot's stdin write
-    // cannot fail just because an argument or the configuration is invalid.
-    // Argument diagnostics still take precedence over input and config errors.
-    let input = read_input();
-    let options = parse_options(args)?;
+fn dispatch(
+    options: Options,
+    input: Result<HookInput, HookError>,
+) -> Result<HookResult, HookError> {
     let input = input?;
     let config_path = config_path(options.config.as_deref())?;
     let configuration = load_configuration(&config_path)?;
@@ -320,7 +373,7 @@ fn dispatch(args: &[OsString]) -> Result<HookResult, HookError> {
     let output = transition(&policy, &state_directory, &input, event)?;
     let message_count = match &output {
         Output::Continue => 0,
-        Output::Emit { messages } => messages.iter().count(),
+        Output::Deny { messages } => messages.iter().count(),
     };
 
     Ok(HookResult {
@@ -335,7 +388,8 @@ fn dispatch(args: &[OsString]) -> Result<HookResult, HookError> {
     })
 }
 
-fn parse_options(args: &[OsString]) -> Result<Options, HookError> {
+fn parse_mode(args: &[OsString]) -> Result<Mode, HookError> {
+    let mut validate = false;
     let mut agent = None;
     let mut event = None;
     let mut config = None;
@@ -346,6 +400,17 @@ fn parse_options(args: &[OsString]) -> Result<Options, HookError> {
         let name = args[index]
             .to_str()
             .ok_or_else(|| HookError::Arguments("argument names must be valid UTF-8".to_owned()))?;
+
+        if name == "--validate" {
+            if validate {
+                return Err(HookError::Arguments(
+                    "--validate was provided more than once".to_owned(),
+                ));
+            }
+            validate = true;
+            index += 1;
+            continue;
+        }
 
         match name {
             "--agent" => {
@@ -375,15 +440,29 @@ fn parse_options(args: &[OsString]) -> Result<Options, HookError> {
         index += 2;
     }
 
+    if validate {
+        if agent.is_some() || event.is_some() {
+            return Err(HookError::Arguments(
+                "--validate cannot be combined with --agent or --event".to_owned(),
+            ));
+        }
+        if state_directory.is_some() {
+            return Err(HookError::Arguments(
+                "--validate cannot be combined with --state-dir".to_owned(),
+            ));
+        }
+        return Ok(Mode::Validate { config });
+    }
+
     let agent = agent.ok_or_else(|| HookError::Arguments("missing required --agent".to_owned()))?;
     let event = event.ok_or_else(|| HookError::Arguments("missing required --event".to_owned()))?;
 
-    Ok(Options {
+    Ok(Mode::Invoke(Options {
         agent,
         event,
         config,
         state_directory,
-    })
+    }))
 }
 
 fn next_value<'a>(args: &'a [OsString], index: usize, name: &str) -> Result<&'a OsStr, HookError> {
@@ -451,7 +530,7 @@ fn load_configuration(path: &Path) -> Result<Configuration, HookError> {
 
     Configuration::parse(&source).map_err(|source| HookError::ConfigInvalid {
         path: path.display().to_string(),
-        source,
+        source: Box::new(source),
     })
 }
 
@@ -484,9 +563,6 @@ fn event_for(event: HookEvent, input: &HookInput) -> Result<Option<Event>, HookE
                 now_ms: input.timestamp,
             })
         }
-        HookEvent::PostToolUse | HookEvent::PostToolUseFailure => Some(Event::ToolAfter {
-            now_ms: input.timestamp,
-        }),
         HookEvent::PreCompact => Some(Event::Observed {
             event: ObservedEvent::PreCompact,
             now_ms: input.timestamp,
@@ -585,6 +661,59 @@ fn warn_reset_state(reason: &impl fmt::Display) {
     );
 }
 
+/// Runs `--validate`: the one mode that is fail-closed. See the module docs.
+fn validate(config_override: Option<&Path>) -> ExitCode {
+    let path = match config_path(config_override) {
+        Ok(path) => path,
+        Err(error) => return validate_failure(&error),
+    };
+
+    let configuration = match load_configuration(&path) {
+        Ok(configuration) => configuration,
+        Err(error) => return validate_failure(&error),
+    };
+
+    if configuration.is_empty() {
+        let stderr = io::stderr();
+        let mut stderr = stderr.lock();
+        let _ = writeln!(
+            stderr,
+            "copilot-agent-reminders: warning: configuration {} has no configured agents; all \
+             reminders are disabled",
+            single_line(&path.display())
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    let agents = configuration.agent_count();
+    let rules = configuration.rule_count();
+    let _ = write_stdout(&format!(
+        "copilot-agent-reminders: configuration {} is valid ({} {}, {} {})\n",
+        path.display(),
+        agents,
+        pluralize(agents, "agent"),
+        rules,
+        pluralize(rules, "rule"),
+    ));
+    ExitCode::SUCCESS
+}
+
+fn validate_failure(error: &HookError) -> ExitCode {
+    let stderr = io::stderr();
+    let mut stderr = stderr.lock();
+    let _ = writeln!(stderr, "copilot-agent-reminders: {}", single_line(error));
+    drop(stderr);
+    ExitCode::FAILURE
+}
+
+fn pluralize(count: usize, noun: &str) -> String {
+    if count == 1 {
+        noun.to_owned()
+    } else {
+        format!("{noun}s")
+    }
+}
+
 fn write_stdout(text: &str) -> io::Result<()> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -616,11 +745,12 @@ mod tests {
             Configuration::parse("{ agents: [ }").expect_err("configuration must be invalid");
         let error = HookError::ConfigInvalid {
             path: "agent-reminders.jsonc".to_owned(),
-            source,
+            source: Box::new(source),
         };
 
         let preserved = std::error::Error::source(&error)
-            .and_then(|source| source.downcast_ref::<ConfigError>());
+            .and_then(|source| source.downcast_ref::<Box<ConfigError>>())
+            .map(AsRef::as_ref);
 
         assert!(matches!(preserved, Some(ConfigError::Syntax(_))));
     }

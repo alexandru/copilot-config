@@ -1,7 +1,8 @@
 //! Parsing and validation of the agent reminders configuration.
 //!
 //! The configuration is a JSON5 document (JSON with comments and trailing
-//! commas). It maps agent names to independent reminder rules:
+//! commas). It maps agent names to independent reminder rules. Every field
+//! shown below is required; there are no defaulted values:
 //!
 //! ```json5
 //! {
@@ -9,7 +10,12 @@
 //!     Orchestrator: [{
 //!       message: "Remember your prompt obligations.",
 //!       resetTools: ["task"],
-//!       condition: { type: "toolCalls", count: 5 },
+//!       signalOnTools: ["*"],
+//!       condition: {
+//!         type: "toolCalls",
+//!         count: 5,
+//!         tools: ["bash", "powershell"],
+//!       },
 //!     }],
 //!   },
 //! }
@@ -19,6 +25,18 @@
 //! then produces an immutable, owned [`Policy`] for one agent. An unknown agent
 //! yields a policy with no rules rather than falling back to another agent's
 //! rules.
+//!
+//! Every rule requires a `signalOnTools`: tool patterns that may carry that
+//! rule's signal once its condition is satisfied. There is no implicit
+//! fallback to `toolCalls.tools` or to a wildcard; omitting it is a parse
+//! error. A rule is rejected at parse time if any `signalOnTools` pattern is
+//! fully subsumed by one of that rule's
+//! `resetTools` patterns (every tool it matches is also matched by that
+//! reset pattern), since reset always wins and such a pattern could never
+//! signal. Subsumption is checked against each reset pattern individually,
+//! not against their union, so a signal pattern that is only partly covered
+//! (e.g. `signalOnTools: ["*"]` alongside `resetTools: ["task"]`) is
+//! accepted.
 //!
 //! Copilot command hooks do not expose context size or utilization. The
 //! `contextGrowth` and `contextUtilizationGrowth` condition types are therefore
@@ -35,12 +53,6 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::time::Seconds;
-
-/// Tool patterns counted by a `toolCalls` condition when `tools` is omitted.
-const DEFAULT_TOOLS: [&str; 2] = ["bash", "powershell"];
-
-/// Tool patterns that reset an interval when `resetTools` is omitted.
-const DEFAULT_RESET_TOOLS: [&str; 1] = ["task"];
 
 /// Domain separator for the policy fingerprint.
 const FINGERPRINT_DOMAIN: &[u8] = b"agent-reminders.policy.v1\0";
@@ -90,6 +102,20 @@ impl ToolPattern {
             None => (&self.0, false),
         }
     }
+
+    /// Returns whether every tool matched by `self` is also matched by `other`,
+    /// i.e. `self` can never match a tool that `other` does not also match.
+    fn subsumed_by(&self, other: &Self) -> bool {
+        let (self_prefix, self_wildcard) = self.parts();
+        let (other_prefix, other_wildcard) = other.parts();
+
+        match (self_wildcard, other_wildcard) {
+            (true, true) => self_prefix.starts_with(other_prefix),
+            (true, false) => false,
+            (false, true) => self_prefix.starts_with(other_prefix),
+            (false, false) => self_prefix == other_prefix,
+        }
+    }
 }
 
 impl fmt::Display for ToolPattern {
@@ -112,6 +138,7 @@ pub(crate) enum ObservedEvent {
 
 /// A validated `toolCalls` condition.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ToolCallsCondition {
     count: NonZeroU64,
     tools: Vec<ToolPattern>,
@@ -131,6 +158,7 @@ impl ToolCallsCondition {
 
 /// A validated `elapsedTime` condition.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ElapsedTimeCondition {
     seconds: Seconds,
 }
@@ -144,6 +172,7 @@ impl ElapsedTimeCondition {
 
 /// A validated `event` condition, which waits for an observed event.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct EventCondition {
     event: ObservedEvent,
 }
@@ -194,6 +223,7 @@ pub(crate) enum Condition {
 pub(crate) struct AgentReminderEntry {
     message: String,
     reset_tools: Vec<ToolPattern>,
+    signal_on_tools: Vec<ToolPattern>,
     condition: Condition,
 }
 
@@ -206,6 +236,11 @@ impl AgentReminderEntry {
     /// Tool patterns whose invocation resets this rule's interval.
     pub(crate) fn reset_tools(&self) -> &[ToolPattern] {
         &self.reset_tools
+    }
+
+    /// Tool patterns eligible to carry this rule's signal.
+    pub(crate) fn signal_on_tools(&self) -> &[ToolPattern] {
+        &self.signal_on_tools
     }
 
     /// Delivery condition for this rule.
@@ -235,7 +270,8 @@ impl Configuration {
     ///
     /// Unknown fields, malformed tool patterns, nonpositive thresholds, empty
     /// agent names or rule arrays, empty composite conditions, overlapping
-    /// counted/reset patterns, and unsupported context conditions are rejected.
+    /// counted/reset patterns, overlapping explicit `denyTools`/`resetTools`
+    /// patterns, and unsupported context conditions are rejected.
     ///
     /// # Errors
     ///
@@ -271,6 +307,16 @@ impl Configuration {
     /// treating an unknown agent in a nonempty configuration as an error.
     pub(crate) fn is_empty(&self) -> bool {
         self.agents.is_empty()
+    }
+
+    /// Returns the number of configured agents.
+    pub(crate) fn agent_count(&self) -> usize {
+        self.agents.len()
+    }
+
+    /// Returns the total number of rules across all configured agents.
+    pub(crate) fn rule_count(&self) -> usize {
+        self.agents.values().map(Vec::len).sum()
     }
 
     /// Returns the immutable, owned policy for an agent.
@@ -514,6 +560,26 @@ pub(crate) enum ConfigError {
         /// Overlapping reset pattern.
         reset: String,
     },
+
+    /// A `signalOnTools` pattern matches only tools already covered by a single
+    /// `resetTools` pattern, so it could never carry a signal.
+    #[error(
+        "agent \"{agent}\" reminder {rule}: signalOnTools pattern \"{pattern}\" at {path} is fully \
+         covered by resetTools pattern \"{reset}\"; a reset tool never signals, so this pattern \
+         could never carry a signal"
+    )]
+    SignalOnToolsSubsumedByReset {
+        /// Agent containing the rule.
+        agent: String,
+        /// Zero-based rule index within the agent's array.
+        rule: usize,
+        /// Path from the rule's root condition to the subsumed pattern.
+        path: String,
+        /// Subsumed `signalOnTools` pattern.
+        pattern: String,
+        /// `resetTools` pattern that covers it.
+        reset: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -527,16 +593,11 @@ struct RawConfiguration {
 #[serde(deny_unknown_fields)]
 struct RawReminder {
     message: String,
-    #[serde(default = "default_reset_tools", rename = "resetTools")]
+    #[serde(rename = "resetTools")]
     reset_tools: Vec<String>,
+    #[serde(rename = "signalOnTools")]
+    signal_on_tools: Vec<String>,
     condition: Value,
-}
-
-fn default_reset_tools() -> Vec<String> {
-    DEFAULT_RESET_TOOLS
-        .iter()
-        .map(|pattern| (*pattern).to_owned())
-        .collect()
 }
 
 /// Parse-time location of a rule or condition within the configuration.
@@ -576,6 +637,12 @@ impl<'a> RuleLocation<'a> {
             format!("{}.tools[{index}]", self.path),
         )
     }
+
+    /// Location of the tool pattern at `index` within this rule's
+    /// `signalOnTools`.
+    fn signal_tool(&self, index: usize) -> Self {
+        Self::new(self.agent, self.rule, format!("signalOnTools[{index}]"))
+    }
 }
 
 fn parse_reminder(
@@ -593,11 +660,32 @@ fn parse_reminder(
         reset_tools.push(parse_tool_pattern(pattern, &location)?);
     }
 
+    let mut signal_on_tools = Vec::with_capacity(raw.signal_on_tools.len());
+    let signal_location = RuleLocation::new(agent, rule, "");
+    for (pattern_index, pattern) in raw.signal_on_tools.iter().enumerate() {
+        let pattern_location = signal_location.signal_tool(pattern_index);
+        let pattern = parse_tool_pattern(pattern, &pattern_location)?;
+        for reset in &reset_tools {
+            if pattern.subsumed_by(reset) {
+                return Err(ConfigError::SignalOnToolsSubsumedByReset {
+                    agent: agent.to_owned(),
+                    rule,
+                    path: pattern_location.path.clone(),
+                    pattern: pattern.to_string(),
+                    reset: reset.to_string(),
+                });
+            }
+        }
+        signal_on_tools.push(pattern);
+    }
+
     let location = RuleLocation::new(agent, rule, "condition");
     let condition = parse_condition(&raw.condition, &location)?;
+
     let entry = AgentReminderEntry {
         message: raw.message,
         reset_tools,
+        signal_on_tools,
         condition,
     };
     validate_no_count_reset_overlap(agent, rule, &entry)?;
@@ -612,10 +700,16 @@ fn validate_nonempty_name(agent: &str) -> Result<(), ConfigError> {
     }
 }
 
+/// Validates a tool pattern: an exact name, a trailing-`*` prefix, or the
+/// bare wildcard `*` matching every tool.
 fn parse_tool_pattern(
     value: &str,
     location: &RuleLocation<'_>,
 ) -> Result<ToolPattern, ConfigError> {
+    if value == "*" {
+        return Ok(ToolPattern(value.to_owned()));
+    }
+
     let prefix = value.strip_suffix('*').unwrap_or(value);
     let is_valid = !prefix.is_empty()
         && prefix
@@ -651,14 +745,10 @@ fn parse_condition(value: &Value, location: &RuleLocation<'_>) -> Result<Conditi
                 .ok_or_else(|| missing_field(location, "count"))?;
             let count = positive_count(count_value)
                 .ok_or_else(|| invalid_condition(location, "`count` must be a positive integer"))?;
-            let tools = match object.get("tools") {
-                Some(value) => parse_tool_array(value, location)?,
-                None => DEFAULT_TOOLS
-                    .iter()
-                    .map(|pattern| ToolPattern((*pattern).to_owned()))
-                    .collect(),
-            };
-
+            let tools_value = object
+                .get("tools")
+                .ok_or_else(|| missing_field(location, "tools"))?;
+            let tools = parse_tool_array(tools_value, location)?;
             Ok(Condition::ToolCalls(ToolCallsCondition { count, tools }))
         }
         "elapsedTime" => {
@@ -671,7 +761,6 @@ fn parse_condition(value: &Value, location: &RuleLocation<'_>) -> Result<Conditi
                         invalid_condition(location, "`seconds` must be a positive finite number")
                     })
                 })?;
-
             Ok(Condition::ElapsedTime(ElapsedTimeCondition { seconds }))
         }
         "event" => {
@@ -690,7 +779,6 @@ fn parse_condition(value: &Value, location: &RuleLocation<'_>) -> Result<Conditi
                     ));
                 }
             };
-
             Ok(Condition::Event(EventCondition { event }))
         }
         "contextGrowth" => {
@@ -904,10 +992,8 @@ fn fingerprint_for(agent: &str, rules: &[AgentReminderEntry]) -> String {
 
     for rule in rules {
         update_len_prefixed(&mut hasher, rule.message.as_bytes());
-        hasher.update(count_as_u64(rule.reset_tools.len()).to_le_bytes());
-        for pattern in &rule.reset_tools {
-            update_len_prefixed(&mut hasher, pattern.as_str().as_bytes());
-        }
+        hash_tool_patterns(&mut hasher, &rule.reset_tools);
+        hash_tool_patterns(&mut hasher, &rule.signal_on_tools);
         hash_condition(&mut hasher, &rule.condition);
     }
 
@@ -943,6 +1029,13 @@ fn hash_condition(hasher: &mut Sha256, condition: &Condition) {
             hasher.update([4_u8]);
             hash_children(hasher, composite);
         }
+    }
+}
+
+fn hash_tool_patterns(hasher: &mut Sha256, patterns: &[ToolPattern]) {
+    hasher.update(count_as_u64(patterns.len()).to_le_bytes());
+    for pattern in patterns {
+        update_len_prefixed(hasher, pattern.as_str().as_bytes());
     }
 }
 
@@ -982,7 +1075,13 @@ mod tests {
             agents: {
                 Orchestrator: [{
                     message: "Remember your prompt obligations.",
-                    condition: { type: "toolCalls", count: 5 }
+                    resetTools: ["task"],
+                    signalOnTools: ["bash", "powershell"],
+                    condition: {
+                        type: "toolCalls",
+                        count: 5,
+                        tools: ["bash", "powershell"],
+                    }
                 }]
             }
         }
@@ -992,12 +1091,33 @@ mod tests {
         Configuration::parse(input).expect("configuration should be valid")
     }
 
+    #[test]
+    fn subsumed_by_covers_all_pattern_kind_combinations() {
+        let exact = |s: &str| ToolPattern(s.to_owned());
+        let prefix = |s: &str| ToolPattern(format!("{s}*"));
+
+        // exact/exact: equal iff the strings are equal.
+        assert!(exact("task").subsumed_by(&exact("task")));
+        assert!(!exact("task").subsumed_by(&exact("bash")));
+
+        // exact/wildcard: subsumed iff the exact name has the prefix.
+        assert!(exact("task-runner").subsumed_by(&prefix("task")));
+        assert!(!exact("taskless").subsumed_by(&prefix("task-")));
+
+        // wildcard/exact: a prefix pattern always matches more than one exact name.
+        assert!(!prefix("task").subsumed_by(&exact("task")));
+
+        // wildcard/wildcard: subsumed iff the narrower prefix has the wider prefix.
+        assert!(prefix("task-runner").subsumed_by(&prefix("task")));
+        assert!(!prefix("task").subsumed_by(&prefix("task-runner")));
+    }
+
     fn policy_value(configuration: &Configuration, agent: &str) -> Value {
         serde_json::to_value(configuration.policy(agent)).expect("policy should serialize")
     }
 
     #[test]
-    fn defaults_are_normalized_into_the_policy() {
+    fn explicit_fields_round_trip_through_the_policy() {
         let configuration = parse(MINIMAL);
         let policy = configuration.policy("Orchestrator");
 
@@ -1010,6 +1130,7 @@ mod tests {
                 "rules": [{
                     "message": "Remember your prompt obligations.",
                     "resetTools": ["task"],
+                    "signalOnTools": ["bash", "powershell"],
                     "condition": {
                         "type": "toolCalls",
                         "count": 5,
@@ -1028,7 +1149,11 @@ mod tests {
                     Reviewer: [{
                         message: "Review.",
                         resetTools: [],
-                        condition: { type: "elapsedTime", seconds: 0.5 }
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "elapsedTime",
+                            seconds: 0.5,
+                        }
                     }]
                 }
             }"#,
@@ -1061,7 +1186,12 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "Remember.",
-                        condition: { type: "elapsedTime", seconds: 1 },
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "elapsedTime",
+                            seconds: 1,
+                        },
                         extra: true
                     }]
                 }
@@ -1070,7 +1200,13 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "Remember.",
-                        condition: { type: "elapsedTime", seconds: 1, extra: true }
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "elapsedTime",
+                            seconds: 1,
+                            extra: true
+                        }
                     }]
                 }
             }"#,
@@ -1078,7 +1214,14 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "Remember.",
-                        condition: { type: "toolCalls", count: 2, seconds: 1 }
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 2,
+                            tools: ["bash"],
+                            seconds: 1
+                        }
                     }]
                 }
             }"#,
@@ -1095,18 +1238,168 @@ mod tests {
     }
 
     #[test]
+    fn missing_required_fields_are_rejected_with_a_path_accurate_message() {
+        let documents = [
+            (
+                r#"{
+                    agents: {
+                        Orchestrator: [{
+                            condition: { type: "elapsedTime", seconds: 1 },
+                            resetTools: []
+                        }]
+                    }
+                }"#,
+                "message",
+            ),
+            (
+                r#"{
+                    agents: {
+                        Orchestrator: [{
+                            message: "x",
+                            condition: { type: "elapsedTime", seconds: 1 }
+                        }]
+                    }
+                }"#,
+                "resetTools",
+            ),
+            (
+                r#"{
+                    agents: {
+                        Orchestrator: [{
+                            message: "x",
+                            resetTools: [],
+                            signalOnTools: ["*"]
+                        }]
+                    }
+                }"#,
+                "condition",
+            ),
+        ];
+
+        for (document, missing_field_name) in documents {
+            let error = Configuration::parse(document).expect_err("missing field must be rejected");
+            assert!(
+                error.to_string().contains(missing_field_name),
+                "error should mention {missing_field_name:?}: {error}"
+            );
+        }
+
+        let missing_count = r#"{
+            agents: {
+                Orchestrator: [{
+                    message: "x",
+                    resetTools: [],
+                        signalOnTools: ["*"],
+                    condition: { type: "toolCalls", tools: ["bash"] }
+                }]
+            }
+        }"#;
+        let error = Configuration::parse(missing_count).expect_err("count is required");
+        assert_eq!(
+            error.to_string(),
+            "agent \"Orchestrator\" reminder 0: condition condition: missing required field \
+             `count`"
+        );
+
+        let missing_tools = r#"{
+            agents: {
+                Orchestrator: [{
+                    message: "x",
+                    resetTools: [],
+                        signalOnTools: ["*"],
+                    condition: { type: "toolCalls", count: 1 }
+                }]
+            }
+        }"#;
+        let error = Configuration::parse(missing_tools).expect_err("tools is required");
+        assert_eq!(
+            error.to_string(),
+            "agent \"Orchestrator\" reminder 0: condition condition: missing required field \
+             `tools`"
+        );
+
+        let missing_seconds = r#"{
+            agents: {
+                Orchestrator: [{
+                    message: "x",
+                    resetTools: [],
+                        signalOnTools: ["*"],
+                    condition: { type: "elapsedTime" }
+                }]
+            }
+        }"#;
+        let error = Configuration::parse(missing_seconds).expect_err("seconds is required");
+        assert_eq!(
+            error.to_string(),
+            "agent \"Orchestrator\" reminder 0: condition condition: missing required field \
+             `seconds`"
+        );
+
+        let missing_event = r#"{
+            agents: {
+                Orchestrator: [{
+                    message: "x",
+                    resetTools: [],
+                        signalOnTools: ["*"],
+                    condition: { type: "event" }
+                }]
+            }
+        }"#;
+        let error = Configuration::parse(missing_event).expect_err("event is required");
+        assert_eq!(
+            error.to_string(),
+            "agent \"Orchestrator\" reminder 0: condition condition: missing required field \
+             `event`"
+        );
+
+        let missing_signal_on_tools = r#"{
+            agents: {
+                Orchestrator: [{
+                    message: "x",
+                    resetTools: [],
+                    condition: {
+                        type: "any",
+                        conditions: [
+                            { type: "event", event: "preCompact" }
+                        ]
+                    }
+                }]
+            }
+        }"#;
+        let error =
+            Configuration::parse(missing_signal_on_tools).expect_err("signalOnTools is required");
+        assert!(
+            error.to_string().contains("missing field `signalOnTools`"),
+            "error should mention missing signalOnTools: {error}"
+        );
+    }
+
+    #[test]
     fn nested_validation_errors_report_the_full_condition_path() {
         let invalid_seconds = r#"{
             agents: {
                 Orchestrator: [
-                    { message: "x", condition: { type: "elapsedTime", seconds: 1 } },
                     {
                         message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "elapsedTime",
+                            seconds: 1,
+                        }
+                    },
+                    {
+                        message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
                         condition: {
                             type: "any",
                             conditions: [
                                 { type: "all", conditions: [
-                                    { type: "elapsedTime", seconds: 0 }
+                                    {
+                                        type: "elapsedTime",
+                                        seconds: 0,
+                                    }
                                 ] }
                             ]
                         }
@@ -1127,10 +1420,16 @@ mod tests {
             agents: {
                 Orchestrator: [{
                     message: "x",
+                    resetTools: [],
+                        signalOnTools: ["*"],
                     condition: {
                         type: "any",
                         conditions: [
-                            { type: "toolCalls", count: 1, tools: ["bash", "bad*pattern"] }
+                            {
+                                type: "toolCalls",
+                                count: 1,
+                                tools: ["bash", "bad*pattern"],
+                            }
                         ]
                     }
                 }]
@@ -1150,18 +1449,20 @@ mod tests {
     #[test]
     fn empty_and_nonpositive_values_are_rejected() {
         let invalid_documents = [
-            r#"{ agents: { "": [{ message: "x", condition: { type: "elapsedTime", seconds: 1 } }] } }"#,
+            r#"{ agents: { "": [{
+                message: "x",
+                resetTools: [],
+                        signalOnTools: ["*"],
+                condition: { type: "elapsedTime", seconds: 1 }
+            }] } }"#,
             r#"{ agents: { Orchestrator: [] } }"#,
             r#"{
                 agents: {
-                    Orchestrator: [{ message: "", condition: { type: "elapsedTime", seconds: 1 } }]
-                }
-            }"#,
-            r#"{
-                agents: {
                     Orchestrator: [{
-                        message: "x",
-                        condition: { type: "toolCalls", count: 0 }
+                        message: "",
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: { type: "elapsedTime", seconds: 1 }
                     }]
                 }
             }"#,
@@ -1169,7 +1470,13 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
-                        condition: { type: "toolCalls", count: -1 }
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 0,
+                            tools: ["bash"],
+                        }
                     }]
                 }
             }"#,
@@ -1177,7 +1484,13 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
-                        condition: { type: "toolCalls", count: 2, tools: [] }
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: -1,
+                            tools: ["bash"],
+                        }
                     }]
                 }
             }"#,
@@ -1185,6 +1498,22 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 2,
+                            tools: [],
+                        }
+                    }]
+                }
+            }"#,
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
                         condition: { type: "elapsedTime", seconds: 0 }
                     }]
                 }
@@ -1193,6 +1522,8 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
                         condition: { type: "elapsedTime", seconds: -0.5 }
                     }]
                 }
@@ -1201,6 +1532,8 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
                         condition: { type: "all", conditions: [] }
                     }]
                 }
@@ -1226,7 +1559,13 @@ mod tests {
                     agents: {{
                         Orchestrator: [{{
                             message: "x",
-                            condition: {{ type: "toolCalls", count: {count} }}
+                            resetTools: [],
+                        signalOnTools: ["*"],
+                            condition: {{
+                                type: "toolCalls",
+                                count: {count},
+                                tools: ["bash"],
+                            }}
                         }}]
                     }}
                 }}"#
@@ -1271,7 +1610,13 @@ mod tests {
                     agents: {{
                         Orchestrator: [{{
                             message: "x",
-                            condition: {{ type: "toolCalls", count: {count} }}
+                            resetTools: [],
+                        signalOnTools: ["*"],
+                            condition: {{
+                                type: "toolCalls",
+                                count: {count},
+                                tools: ["bash"],
+                            }}
                         }}]
                     }}
                 }}"#
@@ -1290,7 +1635,13 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
-                        condition: { type: "toolCalls", count: 9223372036854775807 }
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 9223372036854775807,
+                            tools: ["bash"],
+                        }
                     }]
                 }
             }"#,
@@ -1304,14 +1655,18 @@ mod tests {
 
     #[test]
     fn malformed_tool_patterns_are_rejected() {
-        for pattern in ["", "*", "**", "a*b", "a b", "mcp.tool", "é"] {
+        for pattern in ["", "**", "a*b", "a b", "mcp.tool", "é"] {
             let document = format!(
                 r#"{{
                     agents: {{
                         Orchestrator: [{{
                             message: "x",
                             resetTools: ["{pattern}"],
-                            condition: {{ type: "elapsedTime", seconds: 1 }}
+                        signalOnTools: ["*"],
+                            condition: {{
+                                type: "elapsedTime",
+                                seconds: 1,
+                            }}
                         }}]
                     }}
                 }}"#
@@ -1330,12 +1685,41 @@ mod tests {
                     Orchestrator: [{
                         message: "x",
                         resetTools: ["task", "mcp-metals_*", "A-z0_9-"],
-                        condition: { type: "toolCalls", count: 1, tools: ["bash*"] }
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 1,
+                            tools: ["bash*"],
+                        }
                     }]
                 }
             }"#,
         );
         assert_eq!(valid.policy("Orchestrator").entries().len(), 1);
+    }
+
+    #[test]
+    fn bare_wildcard_is_a_valid_tool_pattern() {
+        let configuration = parse(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "elapsedTime",
+                            seconds: 1,
+                        }
+                    }]
+                }
+            }"#,
+        );
+
+        assert_eq!(
+            policy_value(&configuration, "Orchestrator")["rules"][0]["signalOnTools"],
+            json!(["*"])
+        );
     }
 
     #[test]
@@ -1346,7 +1730,12 @@ mod tests {
                     Orchestrator: [{
                         message: "x",
                         resetTools: ["bash"],
-                        condition: { type: "toolCalls", count: 1, tools: ["bash*"] }
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 1,
+                            tools: ["bash*"],
+                        }
                     }]
                 }
             }"#,
@@ -1355,10 +1744,15 @@ mod tests {
                     Orchestrator: [{
                         message: "x",
                         resetTools: ["mcp-one*"],
+                        signalOnTools: ["*"],
                         condition: {
                             type: "any",
                             conditions: [
-                                { type: "toolCalls", count: 1, tools: ["mcp-*"] }
+                                {
+                                    type: "toolCalls",
+                                    count: 1,
+                                    tools: ["mcp-*"],
+                                }
                             ]
                         }
                     }]
@@ -1369,7 +1763,12 @@ mod tests {
                     Orchestrator: [{
                         message: "x",
                         resetTools: ["task"],
-                        condition: { type: "toolCalls", count: 1, tools: ["bash", "task"] }
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 1,
+                            tools: ["bash", "task"],
+                        }
                     }]
                 }
             }"#,
@@ -1390,12 +1789,118 @@ mod tests {
                     Orchestrator: [{
                         message: "x",
                         resetTools: ["bash-*"],
-                        condition: { type: "toolCalls", count: 1, tools: ["bash"] }
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 1,
+                            tools: ["bash"],
+                        }
                     }]
                 }
             }"#,
         );
         assert_eq!(disjoint.policy("Orchestrator").entries().len(), 1);
+    }
+
+    #[test]
+    fn signal_on_tools_rejected_only_when_fully_subsumed_by_reset_tools() {
+        fn rejected(reset_tools: &str, signal_on_tools: &str) -> ConfigError {
+            let document = format!(
+                r#"{{
+                    agents: {{
+                        Orchestrator: [{{
+                            message: "x",
+                            resetTools: [{reset_tools}],
+                            signalOnTools: [{signal_on_tools}],
+                            condition: {{
+                                type: "event",
+                                event: "preCompact",
+                            }}
+                        }}]
+                    }}
+                }}"#
+            );
+            Configuration::parse(&document)
+                .expect_err("subsumed signalOnTools pattern must be rejected")
+        }
+
+        fn accepted(reset_tools: &str, signal_on_tools: &str) {
+            let document = format!(
+                r#"{{
+                    agents: {{
+                        Orchestrator: [{{
+                            message: "x",
+                            resetTools: [{reset_tools}],
+                            signalOnTools: [{signal_on_tools}],
+                            condition: {{
+                                type: "event",
+                                event: "preCompact",
+                            }}
+                        }}]
+                    }}
+                }}"#
+            );
+            let configuration = parse(&document);
+            assert_eq!(configuration.policy("Orchestrator").entries().len(), 1);
+        }
+
+        // Exact/exact, dead: rejected.
+        let error = rejected(r#""task""#, r#""task""#);
+        assert!(
+            matches!(error, ConfigError::SignalOnToolsSubsumedByReset { .. }),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.to_string().contains("signalOnTools[0]"),
+            "error should report the exact signalOnTools path: {error}"
+        );
+
+        // Exact pattern inside reset prefix: rejected.
+        let error = rejected(r#""task*""#, r#""task""#);
+        assert!(
+            matches!(error, ConfigError::SignalOnToolsSubsumedByReset { .. }),
+            "unexpected error: {error}"
+        );
+
+        // Prefix pattern inside reset prefix: rejected.
+        let error = rejected(r#""task*""#, r#""task-runner*""#);
+        assert!(
+            matches!(error, ConfigError::SignalOnToolsSubsumedByReset { .. }),
+            "unexpected error: {error}"
+        );
+
+        // Wildcard signal pattern matches tools beyond a narrower reset pattern: accepted.
+        accepted(r#""task""#, r#""*""#);
+
+        // Reset pattern is exact; the signal prefix also matches other tools: accepted.
+        accepted(r#""task""#, r#""task*""#);
+
+        // Disjoint patterns: accepted.
+        accepted(r#""task""#, r#""bash""#);
+    }
+
+    #[test]
+    fn empty_signal_on_tools_is_legal_and_never_signals() {
+        let configuration = parse(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "x",
+                        resetTools: [],
+                        signalOnTools: [],
+                        condition: {
+                            type: "elapsedTime",
+                            seconds: 0.001,
+                        }
+                    }]
+                }
+            }"#,
+        );
+
+        assert_eq!(
+            policy_value(&configuration, "Orchestrator")["rules"][0]["signalOnTools"],
+            json!([])
+        );
     }
 
     #[test]
@@ -1405,15 +1910,27 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
                         condition: {
                             type: "all",
                             conditions: [
-                                { type: "toolCalls", count: 2, tools: ["bash"] },
+                                {
+                                    type: "toolCalls",
+                                    count: 2,
+                                    tools: ["bash"],
+                                },
                                 {
                                     type: "any",
                                     conditions: [
-                                        { type: "elapsedTime", seconds: 0.25 },
-                                        { type: "event", event: "preCompact" }
+                                        {
+                                            type: "elapsedTime",
+                                            seconds: 0.25,
+                                        },
+                                        {
+                                            type: "event",
+                                            event: "preCompact",
+                                        }
                                     ]
                                 }
                             ]
@@ -1428,12 +1945,22 @@ mod tests {
             json!({
                 "type": "all",
                 "conditions": [
-                    { "type": "toolCalls", "count": 2, "tools": ["bash"] },
+                    {
+                        "type": "toolCalls",
+                        "count": 2,
+                        "tools": ["bash"]
+                    },
                     {
                         "type": "any",
                         "conditions": [
-                            { "type": "elapsedTime", "seconds": 0.25 },
-                            { "type": "event", "event": "preCompact" }
+                            {
+                                "type": "elapsedTime",
+                                "seconds": 0.25
+                            },
+                            {
+                                "type": "event",
+                                "event": "preCompact"
+                            }
                         ]
                     }
                 ]
@@ -1448,6 +1975,8 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
+                        resetTools: [],
+                        signalOnTools: ["*"],
                         condition: { type: "unknown" }
                     }]
                 }
@@ -1456,7 +1985,12 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "x",
-                        condition: { type: "event", event: "postCompact" }
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "event",
+                            event: "postCompact",
+                        }
                     }]
                 }
             }"#,
@@ -1478,6 +2012,8 @@ mod tests {
                     agents: {
                         Orchestrator: [{
                             message: "x",
+                            resetTools: [],
+                        signalOnTools: ["*"],
                             condition: {
                                 type: "any",
                                 conditions: [{ type: "contextGrowth", tokens: 20000 }]
@@ -1492,6 +2028,8 @@ mod tests {
                     agents: {
                         Orchestrator: [{
                             message: "x",
+                            resetTools: [],
+                        signalOnTools: ["*"],
                             condition: {
                                 type: "contextUtilizationGrowth",
                                 percentagePoints: 5
@@ -1531,7 +2069,9 @@ mod tests {
             condition.push_str(SUFFIX);
         }
 
-        format!(r#"{{ agents: {{ Orchestrator: [{{ message: "x", condition: {condition} }}] }} }}"#)
+        format!(
+            r#"{{ agents: {{ Orchestrator: [{{ message: "x", resetTools: [], signalOnTools: ["*"], condition: {condition} }}] }} }}"#
+        )
     }
 
     #[test]
@@ -1603,7 +2143,12 @@ mod tests {
                 agents: {{
                     Orchestrator: [{{
                         message: "{brackets}",
-                        condition: {{ type: "elapsedTime", seconds: 1 }},
+                        resetTools: [],
+                        signalOnTools: ["*"],
+                        condition: {{
+                            type: "elapsedTime",
+                            seconds: 1,
+                        }},
                     }}],
                 }},
             }}"#
@@ -1629,11 +2174,21 @@ mod tests {
                     Orchestrator: [
                         {{
                             message: "escaped quote: \" and backslash: \\ and brackets: {brackets}",
-                            condition: {{ type: "elapsedTime", seconds: 1 }}
+                            resetTools: [],
+                        signalOnTools: ["*"],
+                            condition: {{
+                                type: "elapsedTime",
+                                seconds: 1,
+                            }}
                         }},
                         {{
                             message: 'single quote: \' and markers // /* and brackets: {brackets}',
-                            condition: {{ type: "elapsedTime", seconds: 1 }}
+                            resetTools: [],
+                        signalOnTools: ["*"],
+                            condition: {{
+                                type: "elapsedTime",
+                                seconds: 1,
+                            }}
                         }}
                     ]
                 }}
@@ -1684,7 +2239,13 @@ mod tests {
                 agents: {
                     Orchestrator: [{
                         message: "A different reminder.",
-                        condition: { type: "toolCalls", count: 5 }
+                        resetTools: ["task"],
+                        signalOnTools: ["*"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 5,
+                            tools: ["bash", "powershell"],
+                        }
                     }]
                 }
             }"#,
@@ -1694,6 +2255,29 @@ mod tests {
         assert_ne!(
             first.fingerprint(),
             parse(MINIMAL).policy("Reviewer").fingerprint()
+        );
+
+        let changed_signal_on_tools = parse(
+            r#"{
+                agents: {
+                    Orchestrator: [{
+                        message: "Remember your prompt obligations.",
+                        resetTools: ["task"],
+                        signalOnTools: ["bash"],
+                        condition: {
+                            type: "toolCalls",
+                            count: 5,
+                            tools: ["bash", "powershell"],
+                        }
+                    }]
+                }
+            }"#,
+        )
+        .policy("Orchestrator");
+        assert_ne!(
+            first.fingerprint(),
+            changed_signal_on_tools.fingerprint(),
+            "a different signalOnTools set must change the fingerprint"
         );
     }
 }
