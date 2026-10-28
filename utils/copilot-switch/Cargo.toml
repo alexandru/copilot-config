@@ -1,0 +1,17 @@
+[package]
+name = "copilot-switch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+json5 = "0.4"
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

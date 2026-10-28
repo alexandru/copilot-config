@@ -5,8 +5,9 @@
 #   curl -fsSL https://alexandru.github.io/copilot-config/install.sh | bash
 #
 # Only bootstraps what the Python deployer needs (Git, Python, Make); the
-# deployer and the configuration's `make` handle everything else. Stays
-# compatible with macOS's Bash 3.2.
+# configuration's Makefile installs rustup and the Rust toolchain and handles
+# the remaining dependencies and configuration. Stays compatible with macOS's
+# Bash 3.2.
 
 set -euo pipefail
 

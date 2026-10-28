@@ -1,6 +1,8 @@
 # Bootstrap and manage the local Copilot CLI configuration.
-# The default target installs every missing prerequisite, generates the default
-# configuration when missing, and installs the shared skills globally. Never run
+# The default target installs the tooling it manages (Node.js, Coursier and cellar,
+# a Rust toolchain through rustup, and shared skills), builds the Rust utilities,
+# and generates the default configuration when missing. Rust uses the official
+# rustup installer when unavailable. Never run
 # automatically (no CI, no hooks); review upstream skill content before installation.
 
 .NOTPARALLEL:
@@ -11,39 +13,24 @@ SKILLS_AGENT := github-copilot
 SKILLS_INSTALL_FLAGS := -g -a $(SKILLS_AGENT) -y
 # Node.js required by the skills CLI's engines field.
 SKILLS_NODE_MINIMUM := 22.20.0
-# pipx 1.4.0 added `pipx run` support for inline script metadata.
-PIPX_MINIMUM := 1.4.0
-# Packages come only from Homebrew on macOS and the distro's apt repositories on Linux.
+# Third-party packages come only from Homebrew on macOS and the distro's apt
+# repositories on Linux; Rust itself comes from the official rustup installer.
 APT_GET := $(if $(filter 0,$(shell id -u)),,sudo )apt-get
 COURSIER_LINUX_X86_64_URL := https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz
 COURSIER_LINUX_AARCH64_URL := https://github.com/VirtusLab/coursier-m1/releases/latest/download/cs-aarch64-pc-linux.gz
 # Coursier installs launchers outside the default PATH of a non-login shell.
 COURSIER_BIN_PATHS := $(HOME)/.local/bin:$(HOME)/.local/share/coursier/bin:$(HOME)/Library/Application Support/Coursier/bin
+UTILS_MANIFEST := $(CURDIR)/utils/Cargo.toml
+export PATH := $(or $(CARGO_HOME),$(HOME)/.cargo)/bin:$(PATH)
+# Honor CARGO_TARGET_DIR; relative values keep Cargo's meaning of relative to this directory.
+CARGO_TARGET_DIR ?= $(CURDIR)/utils/target
+UTILS_CARGO_FLAGS := --manifest-path "$(UTILS_MANIFEST)" --target-dir "$(CARGO_TARGET_DIR)"
 
-.PHONY: all install-pipx generate-config install-node check-mattpocock-skills-tag install-skills update-skills install-coursier install-cellar test test-copilot-switch
+.PHONY: all generate-config install-node check-mattpocock-skills-tag install-skills update-skills install-coursier install-cellar install-rustup build-utils test-utils check-utils test test-copilot-switch
 
-all: install-pipx generate-config install-node install-skills install-cellar
+all: build-utils generate-config install-node install-skills install-cellar
 
-# copilot-switch runs through pipx.
-install-pipx:
-	@set -e; \
-	sufficient() { \
-		printf "%s\n" "$$(pipx --version 2>/dev/null)" | awk -F. -v minimum="$(PIPX_MINIMUM)" \
-			'{ split(minimum, m, "."); for (i = 1; i <= 3; i++) if ($$i + 0 != m[i] + 0) exit !($$i + 0 > m[i] + 0); exit 0 }'; \
-	}; \
-	if sufficient; then \
-		echo "pipx already installed: $$(pipx --version)"; exit 0; \
-	fi; \
-	case "$$(uname -s)" in \
-		Darwin) brew install pipx ;; \
-		Linux) $(APT_GET) update; $(APT_GET) install -y --no-install-recommends pipx ;; \
-		*) echo "Unsupported platform: $$(uname -s)" >&2; exit 1 ;; \
-	esac; \
-	if ! sufficient; then \
-		echo "pipx $(PIPX_MINIMUM) or later is required; installed: $$(pipx --version 2>/dev/null || echo none)" >&2; exit 1; \
-	fi
-
-generate-config:
+generate-config: build-utils
 	@if [ -f settings.json ] && [ -f mcp-config.json ]; then \
 		echo "settings.json and mcp-config.json already exist; leaving them untouched"; \
 	else \
@@ -155,7 +142,25 @@ install-cellar: install-coursier
 	./bin/utils/setup-path; \
 	echo "Cellar PATH updated; new shells will pick it up."
 
-test: test-copilot-switch
+install-rustup:
+	@command -v rustup >/dev/null 2>&1 || { \
+		installer=$$(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs) || exit $$?; \
+		sh -c "$$installer" -- -y --no-modify-path; }
 
-test-copilot-switch:
-	./tests/copilot-switch-test.py
+test: test-utils
+
+build-utils: install-rustup
+	cargo build $(UTILS_CARGO_FLAGS) --release --locked --workspace --bins
+	mkdir -p bin
+	install -m 0755 "$(CARGO_TARGET_DIR)/release/copilot-agent-reminders" bin/copilot-agent-reminders
+	install -m 0755 "$(CARGO_TARGET_DIR)/release/copilot-switch" bin/copilot-switch
+
+test-utils: install-rustup
+	cargo test $(UTILS_CARGO_FLAGS) --locked --workspace
+
+check-utils: install-rustup
+	cargo fmt --manifest-path "$(UTILS_MANIFEST)" --all -- --check
+	cargo clippy $(UTILS_CARGO_FLAGS) --locked --workspace --all-targets -- -D warnings
+
+test-copilot-switch: install-rustup
+	cargo test $(UTILS_CARGO_FLAGS) --locked -p copilot-switch

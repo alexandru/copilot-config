@@ -32,3 +32,7 @@ settings.json
 sidebar-sessions-state/
 vscode.session.*
 settings.json.lock
+
+# Compiled utility binaries.
+/bin/copilot-agent-reminders
+/bin/copilot-switch

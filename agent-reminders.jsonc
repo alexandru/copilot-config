@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "Orchestrator": [
+      {
+        "message": "Remember your prompt, you should delegate grunt work for efficiency",
+        // Invocation resets the interval, regardless of the tool's result.
+        "resetTools": ["task"],
+        "condition": {
+          "type": "any",
+          "conditions": [
+            {
+              "type": "toolCalls",
+              "count": 5,
+              "tools": ["bash", "powershell"]
+            },
+            // Record the event now; deliver at the next tool-result hook.
+            { "type": "event", "event": "preCompact" }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -39,7 +39,7 @@ alias copilot='command copilot --agent Orchestrator --yolo'
 
 ### Choose a configuration preset (optional)
 
-The [copilot-switch](./bin/copilot-switch.py) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents).
+The [copilot-switch](./utils/copilot-switch/) utility is for quickly switching between multiple setting presets (e.g., multiple sets of models assigned to your agents).
 
 ```sh
 # Example:
