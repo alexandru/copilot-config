@@ -53,8 +53,8 @@
       "subagents": {
         "agents": {
           "Junior": {
-            "model": "gpt-6-luna",
-            "effortLevel": "xhigh",
+            "model": "gpt-6.1-terra",
+            "effortLevel": "low",
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
