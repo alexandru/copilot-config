@@ -15,16 +15,6 @@ tools:
   - "mcp-playwright/*"
 user-invocable: true
 include-custom-instructions: true
-hooks:
-  sessionStart:
-    - type: command
-      command: '"${COPILOT_HOME:-$HOME/.copilot}/bin/copilot-agent-reminders" --agent Orchestrator --event sessionStart'
-  preToolUse:
-    - type: command
-      command: '"${COPILOT_HOME:-$HOME/.copilot}/bin/copilot-agent-reminders" --agent Orchestrator --event preToolUse || true'
-  preCompact:
-    - type: command
-      command: '"${COPILOT_HOME:-$HOME/.copilot}/bin/copilot-agent-reminders" --agent Orchestrator --event preCompact'
 ---
 
 You are Orchestrator, a principal software engineer.
