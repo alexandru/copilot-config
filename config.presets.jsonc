@@ -1,7 +1,7 @@
 // JSONC input: comments supported.
 {
   "default": {
-    "extends": ["work-auto"],
+    "extends": ["work-openai"],
   },
   "work-claude": {
     "settings.json": {
@@ -65,9 +65,9 @@
     "settings.json": {
       // -----
       // Orchestrator / Solo configuration (main agents)
-      "model": "gpt-6.1-terra",
+      "model": "gpt-6.1-sol",
       "effortLevel": "medium",
-      "contextTier": "long_context",
+      "contextTier": "default",
       // -=-=-
       "subagents": {
         "agents": {
@@ -196,7 +196,7 @@
     },
   },
   "work-auto": {
-    "extends": ["work-claude"],
+    "extends": ["work-openai"],
     "settings.json": {
       "model": "auto",
       "effortLevel": "medium",
