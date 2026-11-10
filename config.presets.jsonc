@@ -3,41 +3,114 @@
   "default": {
     "extends": ["work-auto"],
   },
-  "work": {
+  "work-claude": {
     "settings.json": {
       // -----
       // Orchestrator / Solo configuration (main agents)
-      "model": "claude-sonnet-5",
-      "effortLevel": "high",
+      "model": "claude-sonnet-5.5",
+      "effortLevel": "medium",
       "contextTier": "long_context",
       // -=-=-
       "subagents": {
         "agents": {
           "Junior": {
-            "model": "gpt-5.3-codex",
-            "effortLevel": "low",
+            "model": "claude-haiku-5.5",
+            "effortLevel": "high",
+            "contextTier": "long_context",
           },
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-haiku-5.5",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "task": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-haiku-5.5",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "general-purpose": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-haiku-5.5",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "rubber-duck": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-haiku-5.5",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "code-review": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-haiku-5.5",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "research": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-haiku-5.5",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "security-review": {
-            "model": "claude-haiku-4.5",
+            "model": "claude-haiku-5.5",
+            "effortLevel": "medium",
+            "contextTier": "default",
+          },
+        },
+      },
+    },
+    "mcp-config.json": {
+      "mcpServers": {},
+    },
+  },
+  "work-openai": {
+    "settings.json": {
+      // -----
+      // Orchestrator / Solo configuration (main agents)
+      "model": "gpt-6.1-terra",
+      "effortLevel": "medium",
+      "contextTier": "long_context",
+      // -=-=-
+      "subagents": {
+        "agents": {
+          "Junior": {
+            "model": "gpt-6-luna",
+            "effortLevel": "high",
+            "contextTier": "long_context",
+          },
+          // Built-ins, although these should be disabled (hopefully)
+          "explore": {
+            "model": "gpt-6-luna",
+            "effortLevel": "medium",
+            "contextTier": "default",
+          },
+          "task": {
+            "model": "gpt-6-luna",
+            "effortLevel": "medium",
+            "contextTier": "default",
+          },
+          "general-purpose": {
+            "model": "gpt-6-luna",
+            "effortLevel": "medium",
+            "contextTier": "default",
+          },
+          "rubber-duck": {
+            "model": "gpt-6-luna",
+            "effortLevel": "medium",
+            "contextTier": "default",
+          },
+          "code-review": {
+            "model": "gpt-6-luna",
+            "effortLevel": "medium",
+            "contextTier": "default",
+          },
+          "research": {
+            "model": "gpt-6-luna",
+            "effortLevel": "medium",
+            "contextTier": "default",
+          },
+          "security-review": {
+            "model": "gpt-6-luna",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
         },
       },
@@ -59,31 +132,38 @@
           // Built-ins, although these should be disabled (hopefully)
           "explore": {
             "model": "gpt-6-luna",
-            "effortLevel": "high",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "task": {
             "model": "gpt-6-luna",
-            "effortLevel": "high",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "general-purpose": {
             "model": "gpt-6-luna",
-            "effortLevel": "high",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "rubber-duck": {
             "model": "gpt-6-luna",
-            "effortLevel": "high",
+            "effortLevel": "medium",
+            "contextTier": "default",
           },
           "code-review": {
             "model": "claude-sonnet-5",
             "effortLevel": "medium",
+            "contextTier": "default",
           },
           "research": {
             "model": "claude-sonnet-5",
             "effortLevel": "medium",
+            "contextTier": "default",
           },
           "security-review": {
             "model": "claude-sonnet-5",
             "effortLevel": "medium",
+            "contextTier": "default",
           },
         },
       },
@@ -116,7 +196,7 @@
     },
   },
   "work-auto": {
-    "extends": ["work"],
+    "extends": ["work-claude"],
     "settings.json": {
       "model": "auto",
       "effortLevel": "medium",
