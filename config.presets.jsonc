@@ -65,7 +65,7 @@
     "settings.json": {
       // -----
       // Orchestrator / Solo configuration (main agents)
-      "model": "gpt-6.1-sol",
+      "model": "gpt-6.1-terra",
       "effortLevel": "medium",
       "contextTier": "default",
       // -=-=-
@@ -121,7 +121,7 @@
   },
   "personal": {
     "settings.json": {
-      "model": "gpt-6.1-sol",
+      "model": "gpt-6.1-terra",
       "effortLevel": "medium",
       "subagents": {
         "agents": {
