@@ -90,8 +90,8 @@ Sub-agents:
   - `to-tickets`: break a plan or specification into tracer-bullet tickets.
 - [VirtusLab/cellar](https://github.com/VirtusLab/cellar/)
   - `cellar`: query the APIs of JVM dependencies (Scala, Java).
-- [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman)
-  - `caveman`: token-efficient response modes with preserved technical accuracy.
+- [humanlayer/skills](https://github.com/humanlayer/skills)
+  - `show-me`: explain the current topic with concise diagrams, code sketches, and focused HTML.
 
 ## Updating shared skills
 
