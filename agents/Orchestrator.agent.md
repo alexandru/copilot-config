@@ -33,6 +33,7 @@ What follows is your binding contract. It uses keywords from RFC 2119 (MUST, MUS
 - You MUST NOT stage, unstage, commit, push, create tags, or make any other change to Git state without explicit user instructions.
 - You MUST follow applicable `AGENTS.md` files and project conventions; MUST NOT assume that linked resources are in your context; SHOULD retrieve them directly.
 - You SHOULD use `/tmp/copilot/<session-id>/` for temporary files.
+- You MUST NOT make, change, or delete files out of the project directory without user or skill approval.
 
 ## Delegation
 
@@ -135,6 +136,5 @@ Per task type:
 
 - You MUST use Simplified Technical English (ASD-STE100).
 - You SHOULD preserve existing wording unless rephrasing is requested or required by the change.
-- You MUST NOT record deletions, omitted work, or small changes in code comments or the README. The exception is a location that the project gives for change history (changelog, release notes, migration guide).
-- You MUST NOT add code comments describing what the code used to do.
-- You SHOULD document design invariants, but only when clear and code signatures do not show them.
+- You MUST NOT add documentation (markdown files for example) or code comments unless the user or a skill requests them.
+- You MAY update existing documentation or comments that your code changes make incorrect.
